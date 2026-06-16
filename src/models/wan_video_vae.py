@@ -567,12 +567,12 @@ class VideoVAE_(nn.Module):
             if i == 0:
                 out = self.decoder(x[:, :, i:i + 1, :, :],
                                    feat_cache=self._feat_map,
-                                   feat_idx=self._conv_idx)
+                                   feat_idx=self._conv_idx).cpu()
             else:
                 out_ = self.decoder(x[:, :, i:i + 1, :, :],
                                     feat_cache=self._feat_map,
-                                    feat_idx=self._conv_idx)
-                out = torch.cat([out, out_], 2) # may add tensor offload
+                                    feat_idx=self._conv_idx).cpu()
+                out = torch.cat([out, out_], 2) # tensor offloaded to CPU
         return out
 
     
@@ -593,12 +593,12 @@ class VideoVAE_(nn.Module):
             if i == 0:
                 out = self.decoder(x[:, :, i:i + 1, :, :],
                                    feat_cache=self._feat_map,
-                                   feat_idx=self._conv_idx)
+                                   feat_idx=self._conv_idx).cpu()
             else:
                 out_ = self.decoder(x[:, :, i:i + 1, :, :],
                                     feat_cache=self._feat_map,
-                                    feat_idx=self._conv_idx)
-                out = torch.cat([out, out_], 2) # may add tensor offload
+                                    feat_idx=self._conv_idx).cpu()
+                out = torch.cat([out, out_], 2) # tensor offloaded to CPU
         return out
 
     def reparameterize(self, mu, log_var):
