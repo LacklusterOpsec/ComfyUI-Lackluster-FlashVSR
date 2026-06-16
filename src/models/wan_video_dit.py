@@ -33,6 +33,12 @@ try:
 except:
     BLOCK_ATTN_AVAILABLE = False
 
+try:
+    import xformers.ops as xops
+    XFORMERS_AVAILABLE = True
+except ImportError:
+    XFORMERS_AVAILABLE = False
+
 from .sparse_sage.core import sparse_sageattn
 from PIL import Image
 import numpy as np
@@ -297,6 +303,12 @@ def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads
         k = k.view(k.shape[0], k.shape[1], num_heads, -1)
         v = v.view(v.shape[0], v.shape[1], num_heads, -1)
         x = sageattn(q, k, v, tensor_layout="NHD")
+        x = x.reshape(x.shape[0], x.shape[1], -1)
+    elif XFORMERS_AVAILABLE:
+        q = q.view(q.shape[0], q.shape[1], num_heads, -1)
+        k = k.view(k.shape[0], k.shape[1], num_heads, -1)
+        v = v.view(v.shape[0], v.shape[1], num_heads, -1)
+        x = xops.memory_efficient_attention(q, k, v)
         x = x.reshape(x.shape[0], x.shape[1], -1)
     else:
         q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
