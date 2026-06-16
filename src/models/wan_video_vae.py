@@ -1,3 +1,4 @@
+import functools
 from einops import rearrange, repeat
 
 import torch
@@ -657,8 +658,8 @@ class WanVideoVAE(nn.Module):
         return x
 
 
-    def build_mask(self, data, is_bound, border_width):
-        _, _, _, H, W = data.shape
+    @functools.lru_cache(maxsize=128)
+    def _build_mask_cached(self, H, W, is_bound, border_width):
         h = self.build_1d_mask(H, is_bound[0], is_bound[1], border_width[0])
         w = self.build_1d_mask(W, is_bound[2], is_bound[3], border_width[1])
 
@@ -667,6 +668,11 @@ class WanVideoVAE(nn.Module):
 
         mask = torch.stack([h, w]).min(dim=0).values
         mask = rearrange(mask, "H W -> 1 1 1 H W")
+        return mask
+
+    def build_mask(self, data, is_bound, border_width):
+        _, _, _, H, W = data.shape
+        mask = self._build_mask_cached(H, W, is_bound, border_width)
         return mask
 
 
