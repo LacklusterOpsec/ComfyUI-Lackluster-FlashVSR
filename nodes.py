@@ -764,7 +764,7 @@ def create_feather_mask(size, overlap):
     
     return mask
 
-def init_pipeline(model, mode, device, dtype, vae_model="Wan2.1"):
+def init_pipeline(model, mode, device, dtype, vae_model="Wan2.1", compile_dit=False):
     """
     Initialize FlashVSR pipeline with specified model and VAE type.
     
@@ -904,6 +904,12 @@ def init_pipeline(model, mode, device, dtype, vae_model="Wan2.1"):
     pipe.enable_vram_management(num_persistent_param_in_dit=None)
     pipe.init_cross_kv(prompt_path=prompt_path)
     pipe.load_models_to_device(["dit","vae"])
+    if compile_dit:
+        log("Compiling DiT with torch.compile...", message_type='info', icon="⚡")
+        try:
+            pipe.denoising_model = torch.compile(pipe.denoising_model)
+        except Exception as e:
+            log(f"torch.compile failed: {e}", message_type='warning', icon="⚠️")
     pipe.offload_model()
 
     # Log final pipeline info with VAE confirmation
@@ -1394,9 +1400,13 @@ class FlashVSRNodeInitPipe:
                     "default": True,
                     "tooltip": "If enabled, forces offloading of models to CPU RAM after execution to free up VRAM for other nodes."
                 }),
-                "precision": (["fp16", "bf16", "auto"], {
+                "precision": (["fp16", "bf16", "fp8_e4m3fn", "auto"], {
                     "default": "auto",
-                    "tooltip": "Inference precision. 'auto' selects bf16 if supported (RTX 30/40/50 series), otherwise fp16. bf16 is recommended."
+                    "tooltip": "Inference precision. 'auto' selects bf16 if supported, otherwise fp16. 'fp8_e4m3fn' cuts VRAM in half (requires PyTorch 2.1+ and Ada/Hopper GPU)."
+                }),
+                "compile_dit": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Experimental: Use torch.compile on the DiT to speed up inference (requires Triton, may fail on Windows)."
                 }),
                 "device": (device_choices, {
                     "default": device_choices[0],
@@ -1415,7 +1425,7 @@ class FlashVSRNodeInitPipe:
     CATEGORY = "FlashVSR"
     DESCRIPTION = 'Initializes the FlashVSR pipeline. 5 VAE options: Wan2.1, Wan2.2, LightVAE_W2.1, TAE_W2.2, LightTAE_HY1.5. Auto-downloads missing files.'
     
-    def main(self, model, mode, vae_model, force_offload, precision, device, attention_mode):
+    def main(self, model, mode, vae_model, force_offload, precision, compile_dit, device, attention_mode):
         _device = device
         if device == "auto":
             _device = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else device
@@ -1440,6 +1450,7 @@ class FlashVSRNodeInitPipe:
             "fp32": torch.float32,
             "fp16": torch.float16,
             "bf16": torch.bfloat16,
+            "fp8_e4m3fn": getattr(torch, "float8_e4m3fn", torch.float16),
         }
         try:
             dtype = dtype_map[precision]
@@ -1447,7 +1458,7 @@ class FlashVSRNodeInitPipe:
             dtype = torch.bfloat16
 
         # Use unified vae_model parameter
-        pipe = init_pipeline(model, mode, _device, dtype, vae_model=vae_model)
+        pipe = init_pipeline(model, mode, _device, dtype, vae_model=vae_model, compile_dit=compile_dit)
         # FIX 10: Store mode with pipe for unified processing logic
         return((pipe, force_offload, mode),)
 

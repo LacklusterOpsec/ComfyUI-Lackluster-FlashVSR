@@ -110,9 +110,15 @@ For more information, visit: https://github.com/naxci1/ComfyUI-FlashVSR_Stable
     parser.add_argument(
         '--precision',
         type=str,
-        choices=['fp16', 'bf16', 'auto'],
+        choices=['fp16', 'bf16', 'fp8_e4m3fn', 'auto'],
         default='auto',
-        help="Inference precision. 'auto' selects bf16 if supported (RTX 30/40/50 series), otherwise fp16. (default: auto)"
+        help="Inference precision. 'auto' selects bf16 if supported, otherwise fp16. 'fp8_e4m3fn' halves VRAM. (default: auto)"
+    )
+    parser.add_argument(
+        '--compile_dit',
+        action='store_true',
+        default=False,
+        help="Experimental: Use torch.compile on the DiT to speed up inference."
     )
     parser.add_argument(
         '--device',
@@ -548,6 +554,8 @@ def main():
             print("Defaulting to fp16.")
     elif args.precision == "bf16":
         dtype = torch.bfloat16
+    elif args.precision == "fp8_e4m3fn":
+        dtype = getattr(torch, "float8_e4m3fn", torch.float16)
     else:
         dtype = torch.float16
     
@@ -561,7 +569,8 @@ def main():
         mode=args.mode,
         device=device,
         dtype=dtype,
-        vae_model=args.vae_model
+        vae_model=args.vae_model,
+        compile_dit=args.compile_dit
     )
     
     # ==========================================================================
