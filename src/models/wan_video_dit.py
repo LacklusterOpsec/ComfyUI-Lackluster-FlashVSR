@@ -223,11 +223,11 @@ def generate_draft_block_mask_sage(batch_size, nheads, seqlen,
 # ----------------------------
 def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads: int, compatibility_mode=False, attention_mask=None, return_KV=False):
     if ATTENTION_MODE == "sage_attention_2" and SAGE_ATTN_AVAILABLE:
-        q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
-        k = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
-        v = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
-        x = sageattn(q, k, v)
-        x = rearrange(x, "b n s d -> b s (n d)", n=num_heads)
+        q = q.view(q.shape[0], q.shape[1], num_heads, -1)
+        k = k.view(k.shape[0], k.shape[1], num_heads, -1)
+        v = v.view(v.shape[0], v.shape[1], num_heads, -1)
+        x = sageattn(q, k, v, tensor_layout="NHD")
+        x = x.reshape(x.shape[0], x.shape[1], -1)
     elif attention_mask is not None:
         seqlen = q.shape[1]
         seqlen_kv = k.shape[1]
@@ -279,25 +279,25 @@ def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads
             x = F.scaled_dot_product_attention(q, k, v)
         x = rearrange(x, "b n s d -> b s (n d)", n=num_heads)
     elif FLASH_ATTN_3_AVAILABLE:
-        q = rearrange(q, "b s (n d) -> b s n d", n=num_heads)
-        k = rearrange(k, "b s (n d) -> b s n d", n=num_heads)
-        v = rearrange(v, "b s (n d) -> b s n d", n=num_heads)
+        q = q.view(q.shape[0], q.shape[1], num_heads, -1)
+        k = k.view(k.shape[0], k.shape[1], num_heads, -1)
+        v = v.view(v.shape[0], v.shape[1], num_heads, -1)
         x = flash_attn_interface.flash_attn_func(q, k, v)
         if isinstance(x, tuple):
             x = x[0]
-        x = rearrange(x, "b s n d -> b s (n d)", n=num_heads)
+        x = x.reshape(x.shape[0], x.shape[1], -1)
     elif FLASH_ATTN_2_AVAILABLE:
-        q = rearrange(q, "b s (n d) -> b s n d", n=num_heads)
-        k = rearrange(k, "b s (n d) -> b s n d", n=num_heads)
-        v = rearrange(v, "b s (n d) -> b s n d", n=num_heads)
+        q = q.view(q.shape[0], q.shape[1], num_heads, -1)
+        k = k.view(k.shape[0], k.shape[1], num_heads, -1)
+        v = v.view(v.shape[0], v.shape[1], num_heads, -1)
         x = flash_attn.flash_attn_func(q, k, v)
-        x = rearrange(x, "b s n d -> b s (n d)", n=num_heads)
+        x = x.reshape(x.shape[0], x.shape[1], -1)
     elif SAGE_ATTN_AVAILABLE:
-        q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
-        k = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
-        v = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
-        x = sageattn(q, k, v)
-        x = rearrange(x, "b n s d -> b s (n d)", n=num_heads)
+        q = q.view(q.shape[0], q.shape[1], num_heads, -1)
+        k = k.view(k.shape[0], k.shape[1], num_heads, -1)
+        v = v.view(v.shape[0], v.shape[1], num_heads, -1)
+        x = sageattn(q, k, v, tensor_layout="NHD")
+        x = x.reshape(x.shape[0], x.shape[1], -1)
     else:
         q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
         k = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
