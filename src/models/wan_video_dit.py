@@ -357,6 +357,12 @@ def rope_apply(x, freqs, num_heads):
 # ----------------------------
 # Norms & Blocks
 # ----------------------------
+try:
+    from flash_attn.ops.rms_norm import rms_norm as fast_rms_norm
+    HAS_FAST_RMS_NORM = True
+except ImportError:
+    HAS_FAST_RMS_NORM = False
+
 class RMSNorm(nn.Module):
     def __init__(self, dim, eps=1e-5):
         super().__init__()
@@ -367,6 +373,8 @@ class RMSNorm(nn.Module):
         return x * torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
 
     def forward(self, x):
+        if HAS_FAST_RMS_NORM and x.is_cuda:
+            return fast_rms_norm(x, self.weight, self.eps)
         dtype = x.dtype
         return self.norm(x.float()).to(dtype) * self.weight
 
