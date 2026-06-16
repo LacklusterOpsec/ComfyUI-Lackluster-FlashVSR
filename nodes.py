@@ -1402,7 +1402,7 @@ class FlashVSRNodeInitPipe:
                     "default": device_choices[0],
                     "tooltip": "Select the computation device (CUDA GPU, CPU, etc.). 'auto' picks the best available."
                 }),
-                "attention_mode": (["sparse_sage_attention", "block_sparse_attention", "flash_attention_2", "sdpa"], {
+                "attention_mode": (["sparse_sage_attention", "block_sparse_attention", "flash_attention_2", "sdpa", "sage_attention_2"], {
                     "default": "sparse_sage_attention",
                     "tooltip": 'Attention mechanism backend. "sparse_sage"/"block_sparse" use efficient sparse attention. "flash_attention_2"/"sdpa" use dense attention (slower, more VRAM).'
                 }),
@@ -1625,7 +1625,7 @@ class FlashVSRNode:
                     "step": 1,
                     "tooltip": "Process video in chunks of N frames to prevent VRAM OOM. 0 = Process all frames at once."
                 }),
-                "attention_mode": (["sparse_sage_attention", "block_sparse_attention", "flash_attention_2", "sdpa"], {
+                "attention_mode": (["sparse_sage_attention", "block_sparse_attention", "flash_attention_2", "sdpa", "sage_attention_2"], {
                     "default": "sparse_sage_attention",
                     "tooltip": 'Attention mechanism backend. "sparse_sage" is recommended for speed/memory efficiency.'
                 }),

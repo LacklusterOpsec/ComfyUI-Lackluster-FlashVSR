@@ -38,6 +38,7 @@ from PIL import Image
 import numpy as np
 
 USE_BLOCK_ATTN = False
+ATTENTION_MODE = 'sparse_sage_attention'
 
 # ----------------------------
 # Local / window masks
@@ -221,7 +222,13 @@ def generate_draft_block_mask_sage(batch_size, nheads, seqlen,
 # Attention kernels
 # ----------------------------
 def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads: int, compatibility_mode=False, attention_mask=None, return_KV=False):
-    if attention_mask is not None:
+    if ATTENTION_MODE == "sage_attention_2" and SAGE_ATTN_AVAILABLE:
+        q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
+        k = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
+        v = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
+        x = sageattn(q, k, v)
+        x = rearrange(x, "b n s d -> b s (n d)", n=num_heads)
+    elif attention_mask is not None:
         seqlen = q.shape[1]
         seqlen_kv = k.shape[1]
         if USE_BLOCK_ATTN and BLOCK_ATTN_AVAILABLE:
@@ -423,7 +430,9 @@ class SelfAttention(nn.Module):
             self.local_attn_mask_h = h//8
             self.local_attn_mask_w = w//8
             self.local_range = local_range
-        if USE_BLOCK_ATTN and BLOCK_ATTN_AVAILABLE:
+        if ATTENTION_MODE == "sage_attention_2":
+            attention_mask = None
+        elif USE_BLOCK_ATTN and BLOCK_ATTN_AVAILABLE:
             attention_mask = generate_draft_block_mask(B, self.num_heads, seqlen, q_w, k_w, topk=topk, local_attn_mask=self.local_attn_mask)
         else:
             attention_mask = generate_draft_block_mask_sage(B, self.num_heads, seqlen, q_w, k_w, topk=topk, local_attn_mask=self.local_attn_mask)

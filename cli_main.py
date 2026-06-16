@@ -123,9 +123,9 @@ For more information, visit: https://github.com/naxci1/ComfyUI-FlashVSR_Stable
     parser.add_argument(
         '--attention_mode',
         type=str,
-        choices=['sparse_sage_attention', 'block_sparse_attention', 'flash_attention_2', 'sdpa'],
+        choices=['sparse_sage_attention', 'block_sparse_attention', 'flash_attention_2', 'sdpa', 'sage_attention_2'],
         default='sparse_sage_attention',
-        help='Attention mechanism backend. "sparse_sage"/"block_sparse" use efficient sparse attention. "flash_attention_2"/"sdpa" use dense attention. (default: sparse_sage_attention)'
+        help='Attention mechanism backend. "sparse_sage"/"block_sparse" use efficient sparse attention. "flash_attention_2"/"sdpa" use dense attention. "sage_attention_2" uses SageAttention 2. (default: sparse_sage_attention)'
     )
 
     # ==========================================================================
