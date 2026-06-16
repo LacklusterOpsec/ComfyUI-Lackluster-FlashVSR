@@ -904,10 +904,19 @@ def init_pipeline(model, mode, device, dtype, vae_model="Wan2.1", compile_dit=Fa
     pipe.enable_vram_management(num_persistent_param_in_dit=None)
     pipe.init_cross_kv(prompt_path=prompt_path)
     pipe.load_models_to_device(["dit","vae"])
+    if dtype == getattr(torch, "float8_e4m3fn", None):
+        try:
+            import torchao
+            from torchao.quantization import quantize_, float8_weight_only
+            log("Applying torchao FP8 quantization to DiT...", message_type='info', icon="🗜️")
+            quantize_(pipe.dit, float8_weight_only())
+        except ImportError:
+            log("torchao is not installed, falling back to eager FP8...", message_type='warning', icon="⚠️")
+
     if compile_dit:
         log("Compiling DiT with torch.compile...", message_type='info', icon="⚡")
         try:
-            pipe.denoising_model = torch.compile(pipe.denoising_model)
+            pipe.dit = torch.compile(pipe.dit)
         except Exception as e:
             log(f"torch.compile failed: {e}", message_type='warning', icon="⚠️")
     pipe.offload_model()
