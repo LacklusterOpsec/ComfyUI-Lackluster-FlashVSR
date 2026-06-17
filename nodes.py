@@ -900,7 +900,7 @@ def init_pipeline(model, mode, device, dtype, vae_model="Wan2.1", compile_dit=Fa
         pipe.denoising_model().LQ_proj_in = Causal_LQ4x_Proj(in_dim=3, out_dim=1536, layer_num=1).to(device, dtype=dtype)
     pipe.denoising_model().LQ_proj_in.load_state_dict(torch.load(lq_path, map_location="cpu", weights_only=False), strict=True)
     pipe.denoising_model().LQ_proj_in.to(device)
-    pipe.to(device, dtype=dtype)
+    pipe.to(device, dtype=dtype if dtype != getattr(torch, "float8_e4m3fn", None) else torch.float16)
     pipe.enable_vram_management(num_persistent_param_in_dit=None)
     pipe.init_cross_kv(prompt_path=prompt_path)
     pipe.load_models_to_device(["dit","vae"])
@@ -911,7 +911,9 @@ def init_pipeline(model, mode, device, dtype, vae_model="Wan2.1", compile_dit=Fa
             log("Applying torchao FP8 quantization to DiT...", message_type='info', icon="🗜️")
             quantize_(pipe.dit, float8_weight_only())
         except ImportError:
-            log("torchao is not installed, falling back to eager FP8...", message_type='warning', icon="⚠️")
+            log("torchao is not installed, falling back to fp16...", message_type='warning', icon="⚠️")
+        except Exception:
+            log("torchao FP8 quantization failed, falling back to fp16...", message_type='warning', icon="⚠️")
 
     if compile_dit:
         log("Compiling DiT with torch.compile...", message_type='info', icon="⚡")
@@ -1445,6 +1447,7 @@ class FlashVSRNodeInitPipe:
             torch.cuda.set_device(_device)
             
         wan_video_dit.ATTENTION_MODE = attention_mode
+        wan_video_dit.USE_BLOCK_ATTN = (attention_mode == "block_sparse_attention")
 
         # Auto bfloat16 detection
         if precision == "auto":
@@ -1684,7 +1687,7 @@ class FlashVSRNode:
         wan_video_dit.ATTENTION_MODE = attention_mode
         
         # Use unified vae_model parameter    
-        pipe = init_pipeline(model, mode, _device, torch.float16, vae_model=vae_model)
+        pipe = init_pipeline(model, mode, _device, torch.float16, vae_model=vae_model, compile_dit=False)
         # FIX 10: Pass mode for unified processing logic
         output = flashvsr(pipe, frames, scale, True, tiled_vae, tiled_dit, 256, 24, unload_dit, 2.0, 3.0, 11, seed, keep_models_on_cpu, enable_debug, frame_chunk_size, resize_factor, mode=mode)
         return(output.cpu().float(),)

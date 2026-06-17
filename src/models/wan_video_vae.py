@@ -521,10 +521,10 @@ class VideoVAE_(nn.Module):
                                  attn_scales, self.temperal_upsample, dropout)
 
     def forward(self, x):
-        mu, log_var = self.encode(x)
-        z = self.reparameterize(mu, log_var)
-        x_recon = self.decode(z)
-        return x_recon, mu, log_var
+        raise NotImplementedError(
+            "VideoVAE_.forward() requires a scale parameter. "
+            "Use WanVideoVAE.encode() / WanVideoVAE.decode() for inference."
+        )
 
     def encode(self, x, scale):
         self.clear_cache()
@@ -580,7 +580,7 @@ class VideoVAE_(nn.Module):
 
     
     def stream_decode(self, z, scale):
-        # self.clear_cache()
+        self.clear_cache()
         # z: [b,c,t,h,w]
         if isinstance(scale[0], torch.Tensor):
             scale = [s.to(dtype=z.dtype, device=z.device) for s in scale]
@@ -610,11 +610,10 @@ class VideoVAE_(nn.Module):
         return eps * std + mu
 
     def sample(self, imgs, deterministic=False):
-        mu, log_var = self.encode(imgs)
-        if deterministic:
-            return mu
-        std = torch.exp(0.5 * log_var.clamp(-30.0, 20.0))
-        return mu + std * torch.randn_like(std)
+        raise NotImplementedError(
+            "VideoVAE_.sample() requires a scale parameter. "
+            "Use WanVideoVAE.encode() / WanVideoVAE.decode() for inference."
+        )
 
     def clear_cache(self):
         self._conv_num = count_conv3d(self.decoder)
@@ -653,10 +652,11 @@ class WanVideoVAE(nn.Module):
 
     def build_1d_mask(self, length, left_bound, right_bound, border_width):
         x = torch.ones((length,))
-        if not left_bound:
-            x[:border_width] = (torch.arange(border_width) + 1) / border_width
-        if not right_bound:
-            x[-border_width:] = torch.flip((torch.arange(border_width) + 1) / border_width, dims=(0,))
+        if border_width > 0:
+            if not left_bound:
+                x[:border_width] = (torch.arange(border_width) + 1) / border_width
+            if not right_bound:
+                x[-border_width:] = torch.flip((torch.arange(border_width) + 1) / border_width, dims=(0,))
         return x
 
 
@@ -915,10 +915,11 @@ class Wan22VideoVAE(nn.Module):
 
     def build_1d_mask(self, length, left_bound, right_bound, border_width):
         x = torch.ones((length,))
-        if not left_bound:
-            x[:border_width] = (torch.arange(border_width) + 1) / border_width
-        if not right_bound:
-            x[-border_width:] = torch.flip((torch.arange(border_width) + 1) / border_width, dims=(0,))
+        if border_width > 0:
+            if not left_bound:
+                x[:border_width] = (torch.arange(border_width) + 1) / border_width
+            if not right_bound:
+                x[-border_width:] = torch.flip((torch.arange(border_width) + 1) / border_width, dims=(0,))
         return x
 
     def build_mask(self, data, is_bound, border_width):
@@ -1166,10 +1167,10 @@ class LightVideoVAE_(nn.Module):
                                  attn_scales, self.temperal_upsample, dropout)
 
     def forward(self, x):
-        mu, log_var = self.encode(x)
-        z = self.reparameterize(mu, log_var)
-        x_recon = self.decode(z)
-        return x_recon, mu, log_var
+        raise NotImplementedError(
+            "LightVideoVAE_.forward() requires a scale parameter. "
+            "Use LightX2VVAE.encode() / LightX2VVAE.decode() for inference."
+        )
 
     def encode(self, x, scale):
         self.clear_cache()
@@ -1222,6 +1223,7 @@ class LightVideoVAE_(nn.Module):
         return out
 
     def stream_decode(self, z, scale):
+        self.clear_cache()
         if isinstance(scale[0], torch.Tensor):
             scale = [s.to(dtype=z.dtype, device=z.device) for s in scale]
             z = z / scale[1].view(1, self.z_dim, 1, 1, 1) + scale[0].view(
@@ -1250,11 +1252,10 @@ class LightVideoVAE_(nn.Module):
         return eps * std + mu
 
     def sample(self, imgs, deterministic=False):
-        mu, log_var = self.encode(imgs)
-        if deterministic:
-            return mu
-        std = torch.exp(0.5 * log_var.clamp(-30.0, 20.0))
-        return mu + std * torch.randn_like(std)
+        raise NotImplementedError(
+            "LightVideoVAE_.sample() requires a scale parameter. "
+            "Use LightX2VVAE.encode() / LightX2VVAE.decode() for inference."
+        )
 
     def clear_cache(self):
         self._conv_num = count_conv3d(self.decoder)
@@ -1304,10 +1305,11 @@ class LightX2VVAE(nn.Module):
 
     def build_1d_mask(self, length, left_bound, right_bound, border_width):
         x = torch.ones((length,))
-        if not left_bound:
-            x[:border_width] = (torch.arange(border_width) + 1) / border_width
-        if not right_bound:
-            x[-border_width:] = torch.flip((torch.arange(border_width) + 1) / border_width, dims=(0,))
+        if border_width > 0:
+            if not left_bound:
+                x[:border_width] = (torch.arange(border_width) + 1) / border_width
+            if not right_bound:
+                x[-border_width:] = torch.flip((torch.arange(border_width) + 1) / border_width, dims=(0,))
         return x
 
     def build_mask(self, data, is_bound, border_width):

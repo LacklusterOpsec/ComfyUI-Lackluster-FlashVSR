@@ -39,7 +39,10 @@ try:
 except ImportError:
     XFORMERS_AVAILABLE = False
 
-from .sparse_sage.core import sparse_sageattn
+try:
+    from .sparse_sage.core import sparse_sageattn
+except ImportError:
+    sparse_sageattn = None
 from PIL import Image
 import numpy as np
 
@@ -558,10 +561,16 @@ class DiTBlock(nn.Module):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             self.modulation.to(dtype=t_mod.dtype, device=t_mod.device) + t_mod).chunk(6, dim=1)
         input_x = modulate(self.norm1(x), shift_msa, scale_msa)
-        self_attn_output, self_attn_cache_k, self_attn_cache_v = self.self_attn(
-            input_x, freqs, f, h, w, local_num, topk, train_img, block_id,
-            kv_len=kv_len, is_full_block=is_full_block, is_stream=is_stream,
-            pre_cache_k=pre_cache_k, pre_cache_v=pre_cache_v, local_range = local_range)
+        if is_stream:
+            self_attn_output, self_attn_cache_k, self_attn_cache_v = self.self_attn(
+                input_x, freqs, f, h, w, local_num, topk, train_img, block_id,
+                kv_len=kv_len, is_full_block=is_full_block, is_stream=is_stream,
+                pre_cache_k=pre_cache_k, pre_cache_v=pre_cache_v, local_range = local_range)
+        else:
+            self_attn_output = self.self_attn(
+                input_x, freqs, f, h, w, local_num, topk, train_img, block_id,
+                kv_len=kv_len, is_full_block=is_full_block, is_stream=is_stream,
+                pre_cache_k=pre_cache_k, pre_cache_v=pre_cache_v, local_range = local_range)
 
         x = self.gate(x, gate_msa, self_attn_output)
         x = x + self.cross_attn(self.norm3(x), context, is_stream=is_stream)
