@@ -5,6 +5,33 @@ All notable changes to ComfyUI-FlashVSR_Stable will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-06-16
+
+### 🚀 New Features
+
+- **SageAttention 2 Support**: Added full `sage_attention_2` attention mode for self-attention, bypassing block-sparse mask generation for fast dense attention.
+- **Dual FP8 Quantization**: `fp8_e4m3fn` precision option halves DiT VRAM usage. Optional `torchao` float8 weight-only quantization further compresses model weights for 12GB GPUs.
+- **torch.compile DiT Acceleration**: Experimental `--compile_dit` flag and GUI toggle enable `torch.compile` on the DiT model for reduced per-step latency.
+- **xformers Memory-Efficient Attention Fallback**: When FlashAttn 2/3 and SageAttn are unavailable, `xformers.ops.memory_efficient_attention` serves as GPU-accelerated fallback (2-3x faster than SDPA).
+
+### ⚡ Performance
+
+- **Fused RMSNorm**: Leverages `flash_attn.ops.rms_norm` fused kernel for combined normalization + weight in a single CUDA kernel.
+- **CausalConv3d Memory Optimization**: Restructured padding to keep spatial padding native to Conv3d, eliminating `F.pad` memory materialization during VAE encode/decode.
+- **CPU Tensor Offloading (VAE Decode)**: Each decoded frame moved to CPU immediately in tiled decode loop, preventing full-batch GPU accumulation.
+- **VAE Mask Caching**: Tiling blend masks cached via `@functools.lru_cache` to avoid redundant recomputation.
+- **Tensor Layout Optimization**: Replaced `rearrange` with `view`/`reshape` across all attention backends (SageAttn, FlashAttn 2/3) to eliminate unnecessary memory copies.
+
+### 🐛 Bug Fixes
+
+- **DiTBlock Unpack Crash**: Fixed `ValueError: too many values to unpack` when `is_stream=False` by conditionally returning KV cache tuples.
+- **FP8 Pipe Transfer**: Prevented dtype mismatch crash by using `fp16` for `pipe.to()` when FP8 precision is selected.
+- **Stream Decode Cache**: Added `self.clear_cache()` before `stream_decode` to prevent stale convolution caches.
+- **VAE forward()/sample() Safety**: Replaced with `NotImplementedError` guards directing callers to proper encode/decode methods.
+- **build_1d_mask Zero-Width Guard**: Added `border_width > 0` guard to prevent index errors on zero-width tiling boundaries.
+- **Sparse Sage Import Safety**: Wrapped `sparse_sageattn` import in try/except for non-CUDA backends.
+- **Block Attention Wiring**: Fixed `USE_BLOCK_ATTN` not being set to `True` when `attention_mode="block_sparse_attention"`.
+- **torchao Exception Handling**: Added broad `Exception` catch for `quantize_()` failures beyond `ImportError`.
 
 ## [1.3.0] - 2026-02-03
 

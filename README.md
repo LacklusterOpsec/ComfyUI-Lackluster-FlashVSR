@@ -355,6 +355,27 @@ flashvsr_model_path: ""
 
 ---
 
+## 🚀 Release Notes
+
+**2026.06.16 - Version 1.4.0**
+
+- **🧠 SageAttention 2 Support** - Added full `sage_attention_2` attention mode for self-attention, bypassing block-sparse mask generation for fast dense attention. Optimized tensor layouts (`view`/`reshape` instead of `rearrange`) eliminate unnecessary memory copies across all attention backends (SageAttn, FlashAttn 2/3).
+- **🗜️ Dual FP8 Quantization** - `fp8_e4m3fn` precision option halves DiT VRAM usage. Optional `torchao` float8 weight-only quantization (`quantize_` + `float8_weight_only()`) further compresses model weights for 12GB-class GPUs. Both are selectable via the `--precision` CLI flag or the node widget.
+- **⚡ torch.compile DiT Acceleration** - Experimental `--compile_dit` flag and GUI toggle enable `torch.compile` on the DiT model, reducing per-step latency. Automatically falls back with a warning if Triton is unavailable.
+- **🔄 xformers Memory-Efficient Attention Fallback** - When FlashAttn 2/3 and SageAttn are unavailable, `xformers.ops.memory_efficient_attention` now serves as a GPU-accelerated fallback, providing 2-3x faster attention than SDPA on CUDA GPUs.
+- **🧬 Fused RMSNorm** - Leverages `flash_attn.ops.rms_norm` fused kernel when available, combining normalization and weight application into a single CUDA kernel for reduced memory bandwidth.
+- **📦 CausalConv3d Memory Optimization** - Restructured padding to keep spatial padding native to Conv3d, eliminating temporary `F.pad` memory materialization and reducing VRAM spikes during VAE encode/decode.
+- **🚀 CPU Tensor Offloading (VAE Decode)** - Each decoded frame is immediately moved to CPU during the tiled decode loop, keeping only one frame in GPU memory at a time instead of accumulating the full batch.
+- **📊 VAE Mask Caching** - Tiling blend masks are now cached via `@functools.lru_cache`, avoiding redundant recomputation when processing multiple frames with identical spatial dimensions.
+- **🐛 DiTBlock Unpack Crash Fix** - Fixed `ValueError: too many values to unpack` when `is_stream=False` by returning only the attention output tensor (not KV cache tuples) from `SelfAttention` in non-stream mode.
+- **🐛 FP8 Pipe Transfer Fix** - Prevented `RuntimeError: mat1 and mat2 must have the same dtype` by using `fp16` for `pipe.to()` when FP8 precision is selected (FP8 is not supported for all pipeline operations).
+- **🐛 Stream Decode Cache Fix** - Added `self.clear_cache()` before `stream_decode` to prevent stale convolution caches from corrupting VAE output across successive calls.
+- **🐛 VAE forward()/sample() Safety** - Replaced `forward()` and `sample()` methods with `NotImplementedError` guards that direct callers to use `WanVideoVAE.encode()/decode()` with explicit scale parameters.
+- **🐛 build_1d_mask Zero-Width Guard** - Added `border_width > 0` guard to prevent index errors when tiling boundaries have zero-width overlap.
+- **🐛 Sparse Sage Import Safety** - Wrapped `sparse_sageattn` import in try/except to prevent crash when `sparse_sage` module is unavailable on non-CUDA backends.
+- **🐛 Block Attention Wiring** - Fixed `USE_BLOCK_ATTN` not being set to `True` when `attention_mode="block_sparse_attention"` is selected, which caused incorrect mask generation.
+- **🐛 torchao Exception Handling** - Added broad `Exception` catch for `quantize_()` failures beyond `ImportError`, preventing pipeline abort when torchao is installed but fails to quantize.
+
 ## 🏷️ Recent Changes
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history.
