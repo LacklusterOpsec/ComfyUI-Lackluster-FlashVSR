@@ -4,17 +4,32 @@ import os
 import unittest
 from unittest.mock import MagicMock
 
+import importlib.machinery
+
+def make_mock_module(name):
+    m = MagicMock()
+    m.__spec__ = importlib.machinery.ModuleSpec(name, None)
+    return m
+
 # Mock ComfyUI modules
-sys.modules['folder_paths'] = MagicMock()
+sys.modules['folder_paths'] = make_mock_module('folder_paths')
 sys.modules['folder_paths'].get_filename_list = MagicMock(return_value=[])
+sys.modules['folder_paths'].folder_names_and_paths = {}
 sys.modules['folder_paths'].models_dir = "/tmp/models"
-sys.modules['comfy'] = MagicMock()
-sys.modules['comfy.utils'] = MagicMock()
+sys.modules['folder_paths'].get_folder_paths = MagicMock(return_value=[])
+sys.modules['folder_paths'].get_full_path = MagicMock(return_value=None)
+sys.modules['comfy'] = make_mock_module('comfy')
+sys.modules['comfy.utils'] = make_mock_module('comfy.utils')
 sys.modules['comfy.utils'].ProgressBar = MagicMock()
+sys.modules['comfy.model_management'] = make_mock_module('comfy.model_management')
+sys.modules['comfy.model_management'].throw_exception_if_processing_interrupted = MagicMock()
+sys.modules['comfy.model_management'].soft_empty_cache = MagicMock()
+sys.modules['comfy.model_management'].free_memory = MagicMock()
+sys.modules['comfy.model_management'].get_torch_device = MagicMock(return_value=torch.device("cpu") if 'torch' in sys.modules else "cpu")
 
 # Mock dependencies that might be missing or require heavy setup
-sys.modules['sageattention'] = MagicMock()
-sys.modules['flash_attn'] = MagicMock()
+sys.modules['sageattention'] = make_mock_module('sageattention')
+sys.modules['flash_attn'] = make_mock_module('flash_attn')
 
 import torch
 # We need to ensure torch.cuda.is_available is mocked if no GPU
@@ -198,6 +213,7 @@ class TestFlashVSRNodes(unittest.TestCase):
         try:
             pipe(
                 prompt="test",
+                cfg_scale=1.0,
                 num_frames=5,
                 height=64,
                 width=64,

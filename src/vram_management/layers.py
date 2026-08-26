@@ -32,10 +32,9 @@ class AutoWrappedModule(torch.nn.Module):
 
     def forward(self, *args, **kwargs):
         if self.onload_dtype == self.computation_dtype and self.onload_device == self.computation_device:
-            module = self.module
+            return self.module(*args, **kwargs)
         else:
-            module = copy.deepcopy(self.module).to(dtype=self.computation_dtype, device=self.computation_device)
-        return module(*args, **kwargs)
+            return self.module.to(dtype=self.computation_dtype, device=self.computation_device)(*args, **kwargs)
     
 
 class AutoWrappedLinear(torch.nn.Linear):

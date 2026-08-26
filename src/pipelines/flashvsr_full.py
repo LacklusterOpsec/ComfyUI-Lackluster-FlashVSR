@@ -174,15 +174,6 @@ class FlashVSRFullPipeline(BasePipeline):
         self.prompt_emb_posi = None
         self.ColorCorrector = TorchColorCorrectorWavelet(levels=5)
 
-        print(r"""
- ███████╗██╗      █████╗ ███████╗██╗  ██╗██╗   ██╗███████╗█████╗
- ██╔════╝██║     ██╔══██╗██╔════╝██║  ██║██║   ██║██╔════╝██╔══██╗   ██╗     ██╗
- █████╗  ██║     ███████║███████╗███████║╚██╗ ██╔╝███████╗███████║ ██████╗ ██████╗
- ██╔══╝  ██║     ██╔══██║╚════██║██╔══██║ ╚████╔╝ ╚════██║██╔═██║    ██╔═╝   ██╔═╝
- ██║     ███████╗██║  ██║███████║██║  ██║  ╚██╔╝  ███████║██║  ██║   ╚═╝     ╚═╝
- ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝
-""")
-
     def enable_vram_management(self, num_persistent_param_in_dit=None):
         # 仅管理 dit / vae
         dtype = next(iter(self.dit.parameters())).dtype
@@ -314,12 +305,14 @@ class FlashVSRFullPipeline(BasePipeline):
         self.prompt_emb_posi['stats'] = "offload"
         if hasattr(self.dit, "LQ_proj_in"):
             self.dit.LQ_proj_in.to('cpu')
+        if hasattr(self, "TCDecoder") and self.TCDecoder is not None:
+            self.TCDecoder.to('cpu')
         if keep_vae:
             self.load_models_to_device(["vae"])
         else:
             self.load_models_to_device([])
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def __call__(
         self,
         prompt=None,
@@ -417,42 +410,46 @@ class FlashVSRFullPipeline(BasePipeline):
             # Fallback to VAE if TCDecoder not loaded
             self.vae.clear_cache()
 
-        with torch.no_grad():
-            for cur_process_idx in progress_bar_cmd(range(process_total_num)):
-                if cur_process_idx == 0:
-                    pre_cache_k = [None] * len(self.dit.blocks)
-                    pre_cache_v = [None] * len(self.dit.blocks)
-                    LQ_latents = None
-                    inner_loop_num = 7
-                    for inner_idx in range(inner_loop_num):
-                        cur = self.denoising_model().LQ_proj_in.stream_forward(
-                            LQ_video[:, :, max(0, inner_idx*4-3):(inner_idx+1)*4-3, :, :].to(self.device)
-                        ) if LQ_video is not None else None
-                        if cur is None:
-                            continue
-                        if LQ_latents is None:
-                            LQ_latents = cur
-                        else:
-                            for layer_idx in range(len(LQ_latents)):
-                                LQ_latents[layer_idx] = torch.cat([LQ_latents[layer_idx], cur[layer_idx]], dim=1)
-                    LQ_cur_idx = (inner_loop_num-1)*4-3  # = 21 for inner_loop_num=7
-                    cur_latents = latents[:, :, :6, :, :]
-                else:
-                    LQ_latents = None
-                    inner_loop_num = 2
-                    for inner_idx in range(inner_loop_num):
-                        cur = self.denoising_model().LQ_proj_in.stream_forward(
-                            LQ_video[:, :, cur_process_idx*8+17+inner_idx*4:cur_process_idx*8+21+inner_idx*4, :, :].to(self.device)
-                        ) if LQ_video is not None else None
-                        if cur is None:
-                            continue
-                        if LQ_latents is None:
-                            LQ_latents = cur
-                        else:
-                            for layer_idx in range(len(LQ_latents)):
-                                LQ_latents[layer_idx] = torch.cat([LQ_latents[layer_idx], cur[layer_idx]], dim=1)
-                    LQ_cur_idx = cur_process_idx*8+21+(inner_loop_num-2)*4
-                    cur_latents = latents[:, :, 4+cur_process_idx*2:6+cur_process_idx*2, :, :]
+        for cur_process_idx in progress_bar_cmd(range(process_total_num)):
+            try:
+                import comfy.model_management
+                comfy.model_management.throw_exception_if_processing_interrupted()
+            except ImportError:
+                pass
+            if cur_process_idx == 0:
+                pre_cache_k = [None] * len(self.dit.blocks)
+                pre_cache_v = [None] * len(self.dit.blocks)
+                LQ_latents = None
+                inner_loop_num = 7
+                for inner_idx in range(inner_loop_num):
+                    cur = self.denoising_model().LQ_proj_in.stream_forward(
+                        LQ_video[:, :, max(0, inner_idx*4-3):(inner_idx+1)*4-3, :, :].to(self.device)
+                    ) if LQ_video is not None else None
+                    if cur is None:
+                        continue
+                    if LQ_latents is None:
+                        LQ_latents = cur
+                    else:
+                        for layer_idx in range(len(LQ_latents)):
+                            LQ_latents[layer_idx] = torch.cat([LQ_latents[layer_idx], cur[layer_idx]], dim=1)
+                LQ_cur_idx = (inner_loop_num-1)*4-3  # = 21 for inner_loop_num=7
+                cur_latents = latents[:, :, :6, :, :]
+            else:
+                LQ_latents = None
+                inner_loop_num = 2
+                for inner_idx in range(inner_loop_num):
+                    cur = self.denoising_model().LQ_proj_in.stream_forward(
+                        LQ_video[:, :, cur_process_idx*8+17+inner_idx*4:cur_process_idx*8+21+inner_idx*4, :, :].to(self.device)
+                    ) if LQ_video is not None else None
+                    if cur is None:
+                        continue
+                    if LQ_latents is None:
+                        LQ_latents = cur
+                    else:
+                        for layer_idx in range(len(LQ_latents)):
+                            LQ_latents[layer_idx] = torch.cat([LQ_latents[layer_idx], cur[layer_idx]], dim=1)
+                LQ_cur_idx = cur_process_idx*8+21+(inner_loop_num-2)*4
+                cur_latents = latents[:, :, 4+cur_process_idx*2:6+cur_process_idx*2, :, :]
 
                 # 推理（无 motion_controller / vace）
                 noise_pred_posi, pre_cache_k, pre_cache_v = model_fn_wan_video(

@@ -189,11 +189,15 @@ def hash_state_dict_keys(state_dict, with_shape=True):
 
 def clean_vram():
     gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()
-    if torch.backends.mps.is_available():
-        torch.mps.empty_cache()
+    try:
+        import comfy.model_management
+        comfy.model_management.soft_empty_cache()
+    except Exception:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
 
 def get_device_list():
     devs = ["auto"]
@@ -302,8 +306,8 @@ class Buffer_LQ4x_Proj(nn.Module):
         for i in range(iter_):
             x = self.pixel_shuffle(video[:,:,i*4:(i+1)*4,:,:])
             cache1_x = x[:, :, -CACHE_T:, :, :].clone()
-            self.cache['conv1'] = cache1_x
             x = self.conv1(x, self.cache['conv1'])
+            self.cache['conv1'] = cache1_x
             x = self.norm1(x)
             x = self.act1(x)
             cache2_x = x[:, :, -CACHE_T:, :, :].clone()
@@ -335,8 +339,8 @@ class Buffer_LQ4x_Proj(nn.Module):
             video_clip = torch.cat([first_frame, video_clip], dim=2)
             x = self.pixel_shuffle(video_clip)
             cache1_x = x[:, :, -CACHE_T:, :, :].clone()
-            self.cache['conv1'] = cache1_x
             x = self.conv1(x, self.cache['conv1'])
+            self.cache['conv1'] = cache1_x
             x = self.norm1(x)
             x = self.act1(x)
             cache2_x = x[:, :, -CACHE_T:, :, :].clone()
@@ -346,8 +350,8 @@ class Buffer_LQ4x_Proj(nn.Module):
         else:
             x = self.pixel_shuffle(video_clip)
             cache1_x = x[:, :, -CACHE_T:, :, :].clone()
-            self.cache['conv1'] = cache1_x
             x = self.conv1(x, self.cache['conv1'])
+            self.cache['conv1'] = cache1_x
             x = self.norm1(x)
             x = self.act1(x)
             cache2_x = x[:, :, -CACHE_T:, :, :].clone()

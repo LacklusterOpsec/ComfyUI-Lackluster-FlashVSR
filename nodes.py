@@ -520,14 +520,28 @@ def log_vram_advisory(width, height, num_frames, scale, tiled_vae, tiled_dit, mo
     elif estimated_vram < free_vram * 0.5:
         log("✅ Safe to proceed. VRAM usage should be comfortable.", message_type='info', icon="✅")
 
+# Register custom model folders in folder_paths if available
+try:
+    if "flashvsr" not in folder_paths.folder_names_and_paths:
+        flashvsr_default = os.path.join(folder_paths.models_dir, "flashvsr")
+        folder_paths.add_model_folder_path("flashvsr", flashvsr_default)
+except Exception:
+    pass
+
 def get_flashvsr_model_base_dir():
     """
     Get the base directory for FlashVSR models.
-    Checks model_paths.yaml first, falls back to ComfyUI models directory.
+    Checks model_paths.yaml first, then folder_paths registered flashvsr paths, falls back to ComfyUI models directory.
     """
     custom_path = load_model_paths_config()
     if custom_path:
         return custom_path
+    try:
+        paths = folder_paths.get_folder_paths("flashvsr")
+        if paths:
+            return paths[0]
+    except Exception:
+        pass
     return folder_paths.models_dir
 
 def model_download(model_name="JunhaoZhuang/FlashVSR"):
@@ -543,16 +557,16 @@ def model_download(model_name="JunhaoZhuang/FlashVSR"):
 # =============================================================================
 def download_vae_if_missing(vae_file: str, model_path: str, vae_config: dict) -> str:
     """
-    Check if VAE file exists. If not, attempt to download it using the URL in vae_config.
-    
-    Args:
-        vae_file: The filename of the VAE (e.g., 'Wan2.1_VAE.pth')
-        model_path: The directory where VAE should be saved
-        vae_config: The VAE configuration from VAE_MODEL_MAP (must contain 'url' key)
-    
-    Returns:
-        Full path to the VAE file
+    Check if VAE file exists in ComfyUI vae paths or local model directory. If not, attempt to download it using the URL in vae_config.
     """
+    try:
+        vae_comfy = folder_paths.get_full_path("vae", vae_file)
+        if vae_comfy and os.path.exists(vae_comfy):
+            log(f"VAE file found in ComfyUI vae folder: {vae_comfy}", message_type='info', icon="✅")
+            return vae_comfy
+    except Exception:
+        pass
+
     vae_path = os.path.join(model_path, vae_file)
     
     if os.path.exists(vae_path):
@@ -589,15 +603,12 @@ def download_vae_if_missing(vae_file: str, model_path: str, vae_config: dict) ->
 # =============================================================================
 def tensor2video(frames: torch.Tensor):
     """
-    Convert VAE output tensor to video format.
+    Convert VAE output tensor to video format with in-place normalization.
     
     Input: (B, C, F, H, W) - Batch, Channels, Frames, Height, Width (VAE output)
     Output: (F, H, W, C) - Frames, Height, Width, Channels (video format)
     
     The tensor is normalized from [-1, 1] to [0, 1] for display.
-    
-    NOTE: This function does NOT crop - cropping happens in process_chunk() 
-    AFTER this conversion is complete.
     """
     # Handle different input shapes
     if frames.dim() == 5:
@@ -615,10 +626,8 @@ def tensor2video(frames: torch.Tensor):
     else:
         raise ValueError(f"Unexpected tensor shape: {frames.shape}")
     
-    # Normalize from [-1, 1] to [0, 1]
-    video_final = (video_permuted.float() + 1.0) / 2.0
-    # Clamp to valid range to avoid visual artifacts
-    video_final = torch.clamp(video_final, 0.0, 1.0)
+    # In-place normalize from [-1, 1] to [0, 1] and clamp
+    video_final = video_permuted.float().add_(1.0).mul_(0.5).clamp_(0.0, 1.0)
     
     return video_final
 
@@ -751,18 +760,29 @@ def calculate_tile_coords(height, width, tile_size, overlap):
             
     return coords
 
+_FEATHER_MASK_CACHE = {}
 def create_feather_mask(size, overlap):
     H, W = size
+    key = (H, W, overlap)
+    if key in _FEATHER_MASK_CACHE:
+        return _FEATHER_MASK_CACHE[key].clone()
+
     mask = torch.ones(1, 1, H, W)
-    ramp = torch.linspace(0, 1, overlap)
+    if overlap > 0:
+        ramp = torch.linspace(0, 1, overlap)
+        mask[:, :, :, :overlap] = torch.minimum(mask[:, :, :, :overlap], ramp.view(1, 1, 1, -1))
+        mask[:, :, :, -overlap:] = torch.minimum(mask[:, :, :, -overlap:], ramp.flip(0).view(1, 1, 1, -1))
+        mask[:, :, :overlap, :] = torch.minimum(mask[:, :, :overlap, :], ramp.view(1, 1, -1, 1))
+        mask[:, :, -overlap:, :] = torch.minimum(mask[:, :, -overlap:, :], ramp.flip(0).view(1, 1, -1, 1))
     
-    mask[:, :, :, :overlap] = torch.minimum(mask[:, :, :, :overlap], ramp.view(1, 1, 1, -1))
-    mask[:, :, :, -overlap:] = torch.minimum(mask[:, :, :, -overlap:], ramp.flip(0).view(1, 1, 1, -1))
-    
-    mask[:, :, :overlap, :] = torch.minimum(mask[:, :, :overlap, :], ramp.view(1, 1, -1, 1))
-    mask[:, :, -overlap:, :] = torch.minimum(mask[:, :, -overlap:, :], ramp.flip(0).view(1, 1, -1, 1))
-    
-    return mask
+    _FEATHER_MASK_CACHE[key] = mask
+    return mask.clone()
+
+def _safe_torch_load(path, map_location=None):
+    try:
+        return torch.load(path, map_location=map_location, weights_only=True)
+    except Exception:
+        return torch.load(path, map_location=map_location, weights_only=False)
 
 def init_pipeline(model, mode, device, dtype, vae_model="Wan2.1", compile_dit=False):
     """
@@ -844,7 +864,7 @@ def init_pipeline(model, mode, device, dtype, vae_model="Wan2.1", compile_dit=Fa
             except ImportError:
                 raise RuntimeError("safetensors library required to load .safetensors VAE file.")
         else:
-            sd = torch.load(vae_path, map_location="cpu", weights_only=False)
+            sd = _safe_torch_load(vae_path, map_location="cpu")
         
         # EXPLICIT class instantiation based on user selection (FIX 7)
         # NO state_dict inspection - we trust the user's selection
@@ -880,7 +900,7 @@ def init_pipeline(model, mode, device, dtype, vae_model="Wan2.1", compile_dit=Fa
         # =======================================================================
         multi_scale_channels = [512, 256, 128, 128]
         pipe.TCDecoder = build_tcdecoder(new_channels=multi_scale_channels, device=device, dtype=dtype, new_latent_channels=16+768)
-        mis = pipe.TCDecoder.load_state_dict(torch.load(tcd_path, map_location=device, weights_only=False), strict=False)
+        mis = pipe.TCDecoder.load_state_dict(_safe_torch_load(tcd_path, map_location=device), strict=False)
         pipe.TCDecoder.clean_mem()
         log(f"Loaded TCDecoder for Full Mode (official FlashVSR approach)", message_type='info', icon="✅")
     else:
@@ -891,14 +911,14 @@ def init_pipeline(model, mode, device, dtype, vae_model="Wan2.1", compile_dit=Fa
             pipe = FlashVSRTinyLongPipeline.from_model_manager(mm, device=device)
         multi_scale_channels = [512, 256, 128, 128]
         pipe.TCDecoder = build_tcdecoder(new_channels=multi_scale_channels, device=device, dtype=dtype, new_latent_channels=16+768)
-        mis = pipe.TCDecoder.load_state_dict(torch.load(tcd_path, map_location=device, weights_only=False), strict=False)
+        mis = pipe.TCDecoder.load_state_dict(_safe_torch_load(tcd_path, map_location=device), strict=False)
         pipe.TCDecoder.clean_mem()
     
     if model == "FlashVSR":
         pipe.denoising_model().LQ_proj_in = Buffer_LQ4x_Proj(in_dim=3, out_dim=1536, layer_num=1).to(device, dtype=dtype)
     else:
         pipe.denoising_model().LQ_proj_in = Causal_LQ4x_Proj(in_dim=3, out_dim=1536, layer_num=1).to(device, dtype=dtype)
-    pipe.denoising_model().LQ_proj_in.load_state_dict(torch.load(lq_path, map_location="cpu", weights_only=False), strict=True)
+    pipe.denoising_model().LQ_proj_in.load_state_dict(_safe_torch_load(lq_path, map_location="cpu"), strict=True)
     pipe.denoising_model().LQ_proj_in.to(device)
     pipe.to(device, dtype=dtype if dtype != getattr(torch, "float8_e4m3fn", None) else torch.float16)
     pipe.enable_vram_management(num_persistent_param_in_dit=None)
@@ -967,6 +987,11 @@ class cqdm:
     def __next__(self):
         if self.iterable is None:
             raise TypeError("Cannot call __next__ on a non-iterable cqdm object.")
+        try:
+            import comfy.model_management
+            comfy.model_management.throw_exception_if_processing_interrupted()
+        except ImportError:
+            pass
         try:
             step_start = time.time()
             val = next(self.iterable)
@@ -1202,6 +1227,19 @@ def flashvsr(pipe, frames, scale, color_fix, tiled_vae, tiled_dit, tile_size, ti
         torch.cuda.ipc_collect()
         torch.cuda.empty_cache()
 
+    # Capture original input resolution before any resize
+    original_input_resolution = f"{frames.shape[2]}x{frames.shape[1]}"
+
+    # Request memory freeing from ComfyUI model manager
+    try:
+        import comfy.model_management
+        est_gb = estimate_vram_usage(frames.shape[2], frames.shape[1], frames.shape[0], scale, mode=mode)
+        est_bytes = int(est_gb * (1024 ** 3))
+        comfy.model_management.free_memory(est_bytes, pipe.device)
+        comfy.model_management.soft_empty_cache()
+    except Exception:
+        pass
+
     # ==========================================================================
     # FIX 9: Pre-Flight Resource Check (BEFORE loading heavy models/processing)
     # ==========================================================================
@@ -1274,8 +1312,7 @@ def flashvsr(pipe, frames, scale, color_fix, tiled_vae, tiled_dit, tile_size, ti
             log(f"Warning: VRAM usage is very high ({vram_usage_ratio*100:.1f}% > {VRAM_OOM_THRESHOLD*100:.0f}%)! Enabling fallback options is recommended.", 
                 message_type='warning', icon="⚠️")
 
-    # Store input resolution for summary (FIX 8)
-    input_resolution = f"{frames.shape[2]}x{frames.shape[1]}"
+    # Output resolution
     output_resolution = f"{frames.shape[2] * scale}x{frames.shape[1] * scale}"
     
     # Chunking Logic
@@ -1289,6 +1326,12 @@ def flashvsr(pipe, frames, scale, color_fix, tiled_vae, tiled_dit, tile_size, ti
         log(f"Splitting video into {num_chunks} chunks (size {chunk_size})...", message_type='info', icon="✂️")
 
         for i in range(num_chunks):
+            try:
+                import comfy.model_management
+                comfy.model_management.throw_exception_if_processing_interrupted()
+            except ImportError:
+                pass
+
             chunk_start = i * chunk_size
             chunk_end = min((i + 1) * chunk_size, total_frames)
 
@@ -1372,7 +1415,7 @@ def flashvsr(pipe, frames, scale, color_fix, tiled_vae, tiled_dit, tile_size, ti
     log("=" * 60, message_type='info')
     log("PROCESSING SUMMARY", message_type='finish', icon="📊")
     log(f"Total Processing Time: {total_time:.2f}s ({fps:.2f} FPS)", message_type='info', icon="⏱️")
-    log(f"Input Resolution: {input_resolution} ({frames.shape[0]} frames)", message_type='info', icon="📥")
+    log(f"Input Resolution: {original_input_resolution} ({total_frames} frames)", message_type='info', icon="📥")
     log(f"Output Resolution: {output_resolution} ({final_output_tensor.shape[0]} frames)", message_type='info', icon="📤")
     
     if torch.cuda.is_available():
@@ -1439,12 +1482,11 @@ class FlashVSRNodeInitPipe:
     def main(self, model, mode, vae_model, force_offload, precision, compile_dit, device, attention_mode):
         _device = device
         if device == "auto":
-            _device = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else device
-        if _device == "auto" or _device not in device_choices:
-            raise RuntimeError("No devices found to run FlashVSR!")
-            
-        if _device.startswith("cuda"):
-            torch.cuda.set_device(_device)
+            try:
+                import comfy.model_management
+                _device = str(comfy.model_management.get_torch_device())
+            except Exception:
+                _device = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
             
         wan_video_dit.ATTENTION_MODE = attention_mode
         wan_video_dit.USE_BLOCK_ATTN = (attention_mode == "block_sparse_attention")
@@ -1677,12 +1719,11 @@ class FlashVSRNode:
     DESCRIPTION = 'Single-node FlashVSR upscaling. 5 VAE options: Wan2.1, Wan2.2, LightVAE_W2.1, TAE_W2.2, LightTAE_HY1.5. Auto-downloads missing files.'
     
     def main(self, model, frames, mode, vae_model, scale, tiled_vae, tiled_dit, unload_dit, seed, frame_chunk_size, attention_mode, enable_debug, keep_models_on_cpu, resize_factor):
-        _device = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "auto"
-        if _device == "auto" or _device not in device_choices:
-            raise RuntimeError("No devices found to run FlashVSR!")
-            
-        if _device.startswith("cuda"):
-            torch.cuda.set_device(_device)
+        try:
+            import comfy.model_management
+            _device = str(comfy.model_management.get_torch_device())
+        except Exception:
+            _device = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
             
         wan_video_dit.ATTENTION_MODE = attention_mode
         
@@ -1690,7 +1731,7 @@ class FlashVSRNode:
         pipe = init_pipeline(model, mode, _device, torch.float16, vae_model=vae_model, compile_dit=False)
         # FIX 10: Pass mode for unified processing logic
         output = flashvsr(pipe, frames, scale, True, tiled_vae, tiled_dit, 256, 24, unload_dit, 2.0, 3.0, 11, seed, keep_models_on_cpu, enable_debug, frame_chunk_size, resize_factor, mode=mode)
-        return(output.cpu().float(),)
+        return (output.cpu().float(),)
 
 NODE_CLASS_MAPPINGS = {
     "FlashVSRNode": FlashVSRNode,

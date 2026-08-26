@@ -9,7 +9,7 @@ huggingface_hub
 triton; platform_system!="Windows"
 triton-windows; platform_system=="Windows"
 sageattention
-flash-attn --no-build-isolation; platform_system!="Windows"
+flash-attn; platform_system!="Windows"
 psutil
 opencv-python>=4.8.1.78
 pyyaml

@@ -158,14 +158,14 @@ def generate_draft_block_mask(batch_size, nheads, seqlen,
     attn_map = rearrange(attn_map, 'h (it s1) s2 -> (h it) s1 s2', it=seqlen)
     loop_num, s1, s2 = attn_map.shape
     flat = attn_map.reshape(loop_num, -1)
-    n = flat.shape[1]
     apply_topk = min(flat.shape[1]-1, topk)
-    thresholds = torch.topk(flat, k=apply_topk + 1, dim=1, largest=True).values[:, -1]
-    thresholds = thresholds.unsqueeze(1)
-    mask_new = (flat > thresholds).reshape(loop_num, s1, s2)
+    if apply_topk <= 0:
+        mask_new = torch.zeros_like(flat, dtype=torch.bool).reshape(loop_num, s1, s2)
+    else:
+        thresholds = torch.topk(flat, k=apply_topk + 1, dim=1, largest=True).values[:, -1]
+        thresholds = thresholds.unsqueeze(1)
+        mask_new = (flat > thresholds).reshape(loop_num, s1, s2)
     mask_new = rearrange(mask_new, '(h it) s1 s2 -> h (it s1) s2', it=seqlen)  # keep shape note
-    # 修正：上行变量名统一
-    # mask_new = rearrange(attn_map, 'h (it s1) s2 -> h (it s1) s2', it=seqlen) * 0 + mask_new
     mask = mask_new.unsqueeze(0).repeat(batch_size, 1, 1, 1)
     return mask
 
@@ -244,19 +244,14 @@ def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads
             q = rearrange(q, "b s (n d) -> (b s) n d", n=num_heads)
             k = rearrange(k, "b s (n d) -> (b s) n d", n=num_heads)
             v = rearrange(v, "b s (n d) -> (b s) n d", n=num_heads)
-        else:
-            q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
-            k = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
-            v = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
-        cu_seqlens_q = torch.tensor([0, seqlen], device=q.device, dtype=torch.int32)
-        cu_seqlens_k = torch.tensor([0, seqlen_kv], device=q.device, dtype=torch.int32)
-        head_mask_type = torch.tensor([1]*num_heads, device=q.device, dtype=torch.int32)
-        streaming_info = None
-        base_blockmask = attention_mask
-        max_seqlen_q_ = seqlen
-        max_seqlen_k_ = seqlen_kv
-        p_dropout = 0.0
-        if USE_BLOCK_ATTN and BLOCK_ATTN_AVAILABLE:
+            cu_seqlens_q = torch.tensor([0, seqlen], device=q.device, dtype=torch.int32)
+            cu_seqlens_k = torch.tensor([0, seqlen_kv], device=q.device, dtype=torch.int32)
+            head_mask_type = torch.tensor([1]*num_heads, device=q.device, dtype=torch.int32)
+            streaming_info = None
+            base_blockmask = attention_mask
+            max_seqlen_q_ = seqlen
+            max_seqlen_k_ = seqlen_kv
+            p_dropout = 0.0
             x = block_sparse_attn_func(
                 q, k, v,
                 cu_seqlens_q, cu_seqlens_k,
@@ -272,7 +267,11 @@ def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads
                 return_attn_probs=False,
             ).unsqueeze(0)
             x = rearrange(x, "b s n d -> b s (n d)", n=num_heads)
-        else:
+        elif sparse_sageattn is not None:
+            q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
+            k = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
+            v = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
+            base_blockmask = attention_mask
             x = sparse_sageattn(
                 q, k, v,
                 mask_id=base_blockmask.to(torch.int8),
@@ -280,12 +279,29 @@ def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads
                 tensor_layout="HND"
             )
             x = rearrange(x, "b n s d -> b s (n d)", n=num_heads)
+        elif SAGE_ATTN_AVAILABLE:
+            q = q.view(q.shape[0], q.shape[1], num_heads, -1)
+            k = k.view(k.shape[0], k.shape[1], num_heads, -1)
+            v = v.view(v.shape[0], v.shape[1], num_heads, -1)
+            x = sageattn(q, k, v, tensor_layout="NHD")
+            x = x.reshape(x.shape[0], x.shape[1], -1)
+        elif XFORMERS_AVAILABLE:
+            q = q.view(q.shape[0], q.shape[1], num_heads, -1)
+            k = k.view(k.shape[0], k.shape[1], num_heads, -1)
+            v = v.view(v.shape[0], v.shape[1], num_heads, -1)
+            x = xops.memory_efficient_attention(q, k, v)
+            x = x.reshape(x.shape[0], x.shape[1], -1)
+        else:
+            q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
+            k = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
+            v = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
+            x = F.scaled_dot_product_attention(q, k, v)
+            x = rearrange(x, "b n s d -> b s (n d)", n=num_heads)
     elif compatibility_mode:
         q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
         k = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
         v = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
-        with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=True, enable_mem_efficient=True):
-            x = F.scaled_dot_product_attention(q, k, v)
+        x = F.scaled_dot_product_attention(q, k, v)
         x = rearrange(x, "b n s d -> b s (n d)", n=num_heads)
     elif FLASH_ATTN_3_AVAILABLE:
         q = q.view(q.shape[0], q.shape[1], num_heads, -1)
@@ -317,8 +333,7 @@ def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads
         q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
         k = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
         v = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
-        with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=True, enable_mem_efficient=True):
-            x = F.scaled_dot_product_attention(q, k, v)
+        x = F.scaled_dot_product_attention(q, k, v)
         x = rearrange(x, "b n s d -> b s (n d)", n=num_heads)
     return x
 
@@ -408,6 +423,9 @@ class SelfAttention(nn.Module):
         
         self.attn = AttentionModule(self.num_heads)
         self.local_attn_mask = None
+        self.local_attn_mask_h = None
+        self.local_attn_mask_w = None
+        self.local_range = None
 
     def forward(self, x, freqs, f=None, h=None, w=None, local_num=None, topk=None,
                 train_img=False, block_id=None, kv_len=None, is_full_block=False,
@@ -450,7 +468,11 @@ class SelfAttention(nn.Module):
 
         window_size = win[0]*h*w//128
 
-        if self.local_attn_mask is None or self.local_attn_mask_h!=h//8 or self.local_attn_mask_w!=w//8 or self.local_range!=local_range:
+        if (self.local_attn_mask is None or 
+            self.local_attn_mask_h != h // 8 or 
+            self.local_attn_mask_w != w // 8 or 
+            self.local_range != local_range or
+            self.local_attn_mask.device != k_w.device):
             self.local_attn_mask = build_local_block_mask_shifted_vec_normal_slide(h//8, w//8, local_range, local_range, include_self=True, device=k_w.device)
             self.local_attn_mask_h = h//8
             self.local_attn_mask_w = w//8
