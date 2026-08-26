@@ -9,7 +9,11 @@ Run FlashVSR on 8GB-24GB+ GPUs without artifacts. Features intelligent resource 
 
 ---
 
-Registry Link: https://registry.comfy.org/publishers/naxci1/nodes/ComfyUI-FlashVSR_Stable
+## ComfyUI Node Registry
+
+**Published Version:** [Link to Registry](https://registry.comfy.org/publishers/naxci1/nodes/ComfyUI-FlashVSR_Stable)
+
+**Development Registry:** [Link to Development Registry](https://registry.comfy.org/publishers/naxci1/dev_nodes/ComfyUI-FlashVSR)
 
 ---
 
@@ -59,6 +63,19 @@ See [CHANGELOG.md](CHANGELOG.md) for full version history.
 - **⚡ Auto-Download**: Models download automatically from HuggingFace if missing
 - **🛡️ OOM Protection**: Automatic recovery with progressive fallback (tiled VAE → tiled DiT → chunking)
 - **🔧 Unified Pipeline**: All modes share optimized processing logic
+
+---
+
+**High-performance Video Super Resolution for ComfyUI with VRAM optimization.**
+
+Run FlashVSR on 8GB-24GB+ GPUs without artifacts. Features intelligent resource management, 5 VAE options, and auto-downloading models.
+
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![ComfyUI](https://img.shields.io/badge/ComfyUI-Compatible-green.svg)](https://github.com/comfyanonymous/ComfyUI)
+
+---
+
+Registry Link: https://registry.comfy.org/publishers/naxci1/nodes/ComfyUI-FlashVSR_Stable
 
 ---
 
