@@ -5,6 +5,40 @@ All notable changes to ComfyUI-FlashVSR_Stable will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-08-26
+
+### 🔄 Upstream ComfyUI Compatibility & Integration
+
+- **Execution Interrupt Support**: Added `comfy.model_management.throw_exception_if_processing_interrupted()` calls inside `cqdm.__next__()`, chunk loops, and pipeline step iterations, enabling instant UI task cancellation.
+- **Robust Device Resolution**: Switched default device detection in `FlashVSRNode` and `FlashVSRNodeInitPipe` to `comfy.model_management.get_torch_device()`, eliminating crashes on CPU/MPS backends.
+- **Model Memory Coordination**: Integrated `comfy.model_management.free_memory()` and `comfy.model_management.soft_empty_cache()` before large pipeline allocations to allow ComfyUI to offload upstream models safely.
+- **Model Folder Registration**: Registered `"flashvsr"` path with `folder_paths.add_model_folder_path()` and checked ComfyUI's native `"vae"` search path before auto-downloading VAE weights.
+
+### 🐛 Bug Fixes & Correctness
+
+- **Attention Mask Device Invalidation**: Fixed attention mask caching in `SelfAttention` (`wan_video_dit.py`) by initializing cache attributes and adding device checks (`self.local_attn_mask.device != k_w.device`) to prevent multi-GPU/offload mismatch errors.
+- **`Buffer_LQ4x_Proj` Cache Ordering**: Fixed temporal projection caching bug in `src/models/utils.py` by passing the previous state into `conv1`/`conv2` prior to updating the cache dictionary.
+- **`TCDecoder` VRAM Offload**: Explicitly added `self.TCDecoder.to('cpu')` in `offload_model()` across all pipelines (`full`, `tiny`, `tiny_long`) to prevent VRAM retention when `keep_models_on_cpu` is active.
+- **Top-K Bounds Protection**: Added `if apply_topk <= 0:` guard in `generate_draft_block_mask` to prevent `torch.topk` index-out-of-bounds exceptions.
+- **Sparse Attention Fallback**: Added fallback from `sparse_sageattn` to `sageattn`, `xformers`, or `SDPA` when sparse attention kernel is not compiled or supported.
+
+### ⚡ Performance & VRAM Optimizations
+
+- **Zero-Copy VRAM Wrapper**: Replaced expensive `copy.deepcopy(self.module)` in `AutoWrappedModule.forward` (`src/vram_management/layers.py`) with dynamic parameter casting, drastically speeding up parameter offload/onload.
+- **In-Place Tensor Normalization**: Replaced redundant intermediate tensor allocations in `tensor2video` with in-place arithmetic (`.float().add_(1.0).mul_(0.5).clamp_(0.0, 1.0)`).
+- **Feather Mask Caching**: Cached feather blending masks via `_FEATHER_MASK_CACHE` dictionary by `(H, W, overlap)` in `create_feather_mask()`.
+- **Inference Mode**: Upgraded all pipeline evaluation methods from `@torch.no_grad()` to `@torch.inference_mode()` for lower execution overhead and peak memory reduction.
+
+### 🛠️ Dependencies & Platform Stability
+
+- **PEP 508 Dependency Compliance**: Removed invalid CLI argument `--no-build-isolation` from `requirements.txt`.
+- **Deprecated `sdp_kernel` Cleanup**: Removed deprecated `torch.backends.cuda.sdp_kernel` context manager in favor of direct `F.scaled_dot_product_attention`.
+- **Safe Weights Loading**: Added `_safe_torch_load` with `weights_only=True` and fallback across all model loaders.
+- **Windows Terminal Stability**: Removed raw unicode ASCII banner printing in pipeline initialization to prevent `UnicodeEncodeError` on Windows `cp1252` consoles.
+- **Unit Test Harness**: Fixed test mocking specs in `test_mock.py` so standard test suites run smoothly.
+
+---
+
 ## [1.4.0] - 2026-06-16
 
 ### 🚀 New Features

@@ -357,6 +357,19 @@ flashvsr_model_path: ""
 
 ## 🚀 Release Notes
 
+**2026.08.26 - Version 1.5.0**
+
+- **🛑 ComfyUI Native Cancellation & Interrupts** - Added `comfy.model_management.throw_exception_if_processing_interrupted()` across all progress loops and pipeline step iterations for instant UI cancellation.
+- **🖥️ Robust Device Resolution** - Dynamic execution device resolution via `comfy.model_management.get_torch_device()` eliminates startup crashes across CPU, MPS, and multi-GPU setups.
+- **💾 Coordinated Memory Management** - Pipeline now coordinates large VRAM allocations through `comfy.model_management.free_memory()` and `soft_empty_cache()`, allowing earlier workflow models to offload cleanly.
+- **📁 ComfyUI Folder Integration** - Registered `"flashvsr"` directory with `folder_paths` and searches native ComfyUI `"vae"` locations before auto-downloading.
+- **⚡ Zero-Copy VRAM Wrapping** - Eliminated expensive `copy.deepcopy` bottlenecks during parameter offload/onload with dynamic parameter casting.
+- **🧩 Temporal Convolution Cache Fix** - Corrected temporal buffer state management in `Buffer_LQ4x_Proj` to prevent projection corruption.
+- **🎯 Mask Cache Device Invalidation** - Fixed local attention mask attribute initialization and cross-device offload checks.
+- **🧹 TCDecoder VRAM Reclamation** - Explicitly offloads `TCDecoder` to CPU when offloading is enabled, freeing ~200–500MB VRAM.
+- **🛡️ Out-of-Bounds Guards & Attention Fallbacks** - Added `apply_topk <= 0` bounds protections and graceful fallback to SageAttention/SDPA when sparse attention kernels are unavailable.
+- **🏎️ In-Place Normalization & Feather Mask Caching** - In-place tensor arithmetic in `tensor2video` and spatial caching for tile blending masks.
+
 **2026.06.16 - Version 1.4.0**
 
 - **🧠 SageAttention 2 Support** - Added full `sage_attention_2` attention mode for self-attention, bypassing block-sparse mask generation for fast dense attention. Optimized tensor layouts (`view`/`reshape` instead of `rearrange`) eliminate unnecessary memory copies across all attention backends (SageAttn, FlashAttn 2/3).
