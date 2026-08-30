@@ -39,6 +39,8 @@ if not torch.cuda.is_available():
 from nodes import flashvsr, FlashVSRNodeInitPipe, FlashVSRNode, FlashVSRNodeAdv, VAE_MODEL_OPTIONS, VAE_MODEL_MAP
 from nodes import estimate_vram_usage, get_optimal_settings, check_resources
 from src.pipelines.flashvsr_full import FlashVSRFullPipeline
+from src.pipelines.flashvsr_tiny import FlashVSRTinyPipeline
+from src.pipelines.flashvsr_tiny_long import FlashVSRTinyLongPipeline
 from src.models.wan_video_vae import WanVideoVAE, Wan22VideoVAE, LightX2VVAE, create_video_vae
 
 class TestFlashVSRNodes(unittest.TestCase):
@@ -219,7 +221,8 @@ class TestFlashVSRNodes(unittest.TestCase):
                 width=64,
                 unload_dit=True,
                 force_offload=True,
-                enable_debug_logging=True
+                enable_debug_logging=True,
+                progress_bar_cmd=list
             )
         except Exception as e:
             # We expect it might fail due to tensor mismatches or other mocks,
@@ -246,5 +249,98 @@ class TestFlashVSRNodes(unittest.TestCase):
                 break
         self.assertTrue(found_dit_only, "Should have called load_models_to_device(['dit'])")
 
+    def _setup_mock_pipe(self, pipe_class):
+        import src.pipelines.flashvsr_full
+        import src.pipelines.flashvsr_tiny
+        import src.pipelines.flashvsr_tiny_long
+
+        pipe = pipe_class(device="cpu")
+        pipe.load_models_to_device = MagicMock()
+        pipe.offload_model = MagicMock()
+        pipe.dit = MagicMock()
+        pipe.dit.blocks = [MagicMock()]
+        pipe.dit.LQ_proj_in = MagicMock()
+        pipe.dit.LQ_proj_in.to = MagicMock(return_value=pipe.dit.LQ_proj_in)
+        pipe.dit.LQ_proj_in.stream_forward = MagicMock(return_value=[torch.zeros((1, 1, 16, 8, 8))])
+        pipe.dit.LQ_proj_in.clear_cache = MagicMock()
+        pipe.prompt_emb_posi = {'context': torch.zeros(1), 'stats': 'load'}
+        pipe.timestep = torch.tensor([1000.], dtype=torch.float32)
+        pipe.t = torch.zeros((1, 16))
+        pipe.t_mod = torch.zeros((1, 6, 16))
+        pipe.generate_noise = MagicMock(side_effect=lambda shape, **kwargs: torch.zeros(shape))
+
+        # Setup TCDecoder mock
+        pipe.TCDecoder = MagicMock()
+        pipe.TCDecoder.to = MagicMock(return_value=pipe.TCDecoder)
+        pipe.TCDecoder.decoder = [None] * 10
+        pipe.TCDecoder.clean_mem = MagicMock()
+        pipe.TCDecoder.frames_to_trim = 3
+        class MockColorCorrector(torch.nn.Module):
+            def forward(self, cur_frames, *args, **kwargs):
+                return cur_frames
+
+        pipe.ColorCorrector = MockColorCorrector()
+        # When non-tiled decode_video is called: returns (B, T, 3, H, W)
+        # When tiled decode_video is called: returns (out_tile, new_mem_tile)
+        def mock_decode_video(latents, *args, cond=None, mem=None, **kwargs):
+            B, T, C, H, W = latents.shape
+            out_tensor = torch.zeros((B, T * 4, 3, H, W))
+            if mem is not None:
+                return out_tensor, [torch.zeros(1)] * 10
+            return out_tensor
+        pipe.TCDecoder.decode_video = MagicMock(side_effect=mock_decode_video)
+
+        # Mock model_fn_wan_video in all pipeline modules
+        mock_model_fn = MagicMock(return_value=(torch.zeros((1, 16, 2, 8, 8)), [None], [None]))
+        src.pipelines.flashvsr_full.model_fn_wan_video = mock_model_fn
+        src.pipelines.flashvsr_tiny.model_fn_wan_video = mock_model_fn
+        src.pipelines.flashvsr_tiny_long.model_fn_wan_video = mock_model_fn
+
+        return pipe
+
+    def test_tiny_pipeline_streaming_success(self):
+        """Test FlashVSRTinyPipeline successfully produces output frames for num_frames=33 and num_frames=193."""
+        pipe = self._setup_mock_pipe(FlashVSRTinyPipeline)
+        LQ = torch.zeros((1, 3, 33, 64, 64))
+        out = pipe(
+            prompt="", cfg_scale=1.0, num_frames=33, height=64, width=64,
+            LQ_video=LQ, tiled=False, color_fix=False, progress_bar_cmd=list
+        )
+        self.assertIsNotNone(out)
+        self.assertTrue(out.shape[1] > 0, "Should have produced output frames")
+
+        # Test with 193 frames (the specific user case)
+        pipe = self._setup_mock_pipe(FlashVSRTinyPipeline)
+        LQ_193 = torch.zeros((1, 3, 193, 64, 64))
+        out_193 = pipe(
+            prompt="", cfg_scale=1.0, num_frames=193, height=64, width=64,
+            LQ_video=LQ_193, tiled=False, color_fix=False, progress_bar_cmd=list
+        )
+        self.assertIsNotNone(out_193)
+        self.assertTrue(out_193.shape[1] > 0, "Should have produced output frames for 193 frames")
+
+    def test_tiny_long_pipeline_streaming_success(self):
+        """Test FlashVSRTinyLongPipeline successfully produces output frames for num_frames=193."""
+        pipe = self._setup_mock_pipe(FlashVSRTinyLongPipeline)
+        LQ = torch.zeros((1, 3, 193, 64, 64))
+        out = pipe(
+            prompt="", cfg_scale=1.0, num_frames=193, height=64, width=64,
+            LQ_video=LQ, tiled=False, color_fix=False, progress_bar_cmd=list
+        )
+        self.assertIsNotNone(out)
+        self.assertTrue(out.shape[1] > 0, "Should have produced output frames")
+
+    def test_full_pipeline_streaming_success(self):
+        """Test FlashVSRFullPipeline successfully produces output frames for num_frames=193."""
+        pipe = self._setup_mock_pipe(FlashVSRFullPipeline)
+        LQ = torch.zeros((1, 3, 193, 64, 64))
+        out = pipe(
+            prompt="", cfg_scale=1.0, num_frames=193, height=64, width=64,
+            LQ_video=LQ, tiled=False, color_fix=False, progress_bar_cmd=list
+        )
+        self.assertIsNotNone(out)
+        self.assertTrue(out.shape[1] > 0, "Should have produced output frames")
+
 if __name__ == '__main__':
     unittest.main()
+

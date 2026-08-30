@@ -13,6 +13,11 @@ Run FlashVSR on 8GB-24GB+ GPUs without artifacts. Features intelligent resource 
 
 ## 🚀 Release Notes
 
+**2026.08.30 - Version 1.5.1**
+
+- **🐛 Streaming Loop Premature RuntimeError Fix** - Corrected an indentation bug in `FlashVSRTinyPipeline`, `FlashVSRFullPipeline`, and `FlashVSRTinyLongPipeline` where post-loop cache clears, output validation check (`if not frames_total:`), and final tensor concatenation were accidentally placed inside the streaming `for` loop body. Because iteration 0 is priming-only (does not append to `frames_total`), the check prematurely raised `RuntimeError: FlashVSR streaming pipeline produced no output frames...` at the end of iteration 0. Moving these outside the loop resolves the issue across all video lengths.
+- **🧪 Multi-Chunk Streaming Unit Tests** - Added regression test suite verifying streaming execution across multiple iterations and frame lengths (`num_frames=33` and `num_frames=193`) across all three pipeline variants.
+
 **2026.08.26 - Version 1.5.0**
 
 - **🛑 ComfyUI Native Cancellation & Interrupts** - Added `comfy.model_management.throw_exception_if_processing_interrupted()` across all progress loops and pipeline step iterations for instant UI cancellation.

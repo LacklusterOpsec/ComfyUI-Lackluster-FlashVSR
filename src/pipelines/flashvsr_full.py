@@ -516,26 +516,26 @@ class FlashVSRFullPipeline(BasePipeline):
                     del noise_pred_posi, cur_frames, cur_latents, cur_LQ_frame
                     clean_vram()
 
-            if hasattr(self.dit, "LQ_proj_in"):
-                self.dit.LQ_proj_in.clear_cache()
+        if hasattr(self.dit, "LQ_proj_in"):
+            self.dit.LQ_proj_in.clear_cache()
 
-            # Clean up decoder
-            if self.TCDecoder is not None:
-                self.TCDecoder.clean_mem()
-            else:
-                self.vae.clear_cache()
-                
-            if force_offload:
-                self.offload_model()
+        # Clean up decoder
+        if self.TCDecoder is not None:
+            self.TCDecoder.clean_mem()
+        else:
+            self.vae.clear_cache()
+            
+        if force_offload:
+            self.offload_model()
 
-            if not frames_total:
-                raise RuntimeError(
-                    f"FlashVSR streaming pipeline produced no output frames. "
-                    f"num_frames={num_frames} is too small: the streaming loop needs "
-                    f"num_frames >= 33 (process_total_num={process_total_num}, need >= 2). "
-                    f"Feed more frames or use a larger frame_chunk_size."
-                )
-            frames = torch.cat(frames_total, dim=2)
+        if not frames_total:
+            raise RuntimeError(
+                f"FlashVSR streaming pipeline produced no output frames. "
+                f"num_frames={num_frames} is too small: the streaming loop needs "
+                f"num_frames >= 33 (process_total_num={process_total_num}, need >= 2). "
+                f"Feed more frames or use a larger frame_chunk_size."
+            )
+        frames = torch.cat(frames_total, dim=2)
 
         return frames[0]
 

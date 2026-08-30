@@ -5,6 +5,13 @@ All notable changes to ComfyUI-FlashVSR_Stable will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-08-30
+
+### 🐛 Bug Fixes & Correctness
+
+- **Streaming Loop Premature RuntimeError**: Fixed indentation bug in `src/pipelines/flashvsr_tiny.py`, `src/pipelines/flashvsr_full.py`, and `src/pipelines/flashvsr_tiny_long.py` where post-loop cache clears (`LQ_proj_in.clear_cache()`, `self.TCDecoder.clean_mem()`, `offload_model()`), output validation check (`if not frames_total:`), and final tensor concatenation (`torch.cat`) were indented inside the streaming `for` loop body. In FlashVSR streaming, iteration 0 only primes KV cache states without decoding/appending frames, which caused the check to immediately raise `RuntimeError: FlashVSR streaming pipeline produced no output frames...` at the end of iteration 0 regardless of video length.
+- **Multi-Chunk Streaming Unit Tests**: Added unit tests in `test_mock.py` covering multi-chunk streaming execution for `FlashVSRFullPipeline`, `FlashVSRTinyPipeline`, and `FlashVSRTinyLongPipeline` with both minimum frames (`num_frames=33`) and longer video lengths (`num_frames=193`).
+
 ## [1.5.0] - 2026-08-26
 
 ### 🔄 Upstream ComfyUI Compatibility & Integration
