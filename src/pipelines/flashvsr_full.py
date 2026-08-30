@@ -451,70 +451,70 @@ class FlashVSRFullPipeline(BasePipeline):
                 LQ_cur_idx = cur_process_idx*8+21+(inner_loop_num-2)*4
                 cur_latents = latents[:, :, 4+cur_process_idx*2:6+cur_process_idx*2, :, :]
 
-                # 推理（无 motion_controller / vace）
-                noise_pred_posi, pre_cache_k, pre_cache_v = model_fn_wan_video(
-                    self.dit,
-                    x=cur_latents,
-                    timestep=self.timestep,
-                    context=None,
-                    tea_cache=None,
-                    use_unified_sequence_parallel=False,
-                    LQ_latents=LQ_latents,
-                    is_full_block=is_full_block,
-                    is_stream=is_stream,
-                    pre_cache_k=pre_cache_k,
-                    pre_cache_v=pre_cache_v,
-                    topk_ratio=topk_ratio,
-                    kv_ratio=kv_ratio,
-                    cur_process_idx=cur_process_idx,
-                    t_mod=self.t_mod,
-                    t=self.t,
-                    local_range = local_range,
-                )
+            # 推理（无 motion_controller / vace）
+            noise_pred_posi, pre_cache_k, pre_cache_v = model_fn_wan_video(
+                self.dit,
+                x=cur_latents,
+                timestep=self.timestep,
+                context=None,
+                tea_cache=None,
+                use_unified_sequence_parallel=False,
+                LQ_latents=LQ_latents,
+                is_full_block=is_full_block,
+                is_stream=is_stream,
+                pre_cache_k=pre_cache_k,
+                pre_cache_v=pre_cache_v,
+                topk_ratio=topk_ratio,
+                kv_ratio=kv_ratio,
+                cur_process_idx=cur_process_idx,
+                t_mod=self.t_mod,
+                t=self.t,
+                local_range = local_range,
+            )
 
-                # 更新 latent
-                cur_latents = cur_latents - noise_pred_posi
-                
-                # =======================================================================
-                # DECODE: Use TCDecoder with LQ conditioning (like tiny-long)
-                # =======================================================================
-                cur_LQ_frame = LQ_video[:,:,LQ_pre_idx:LQ_cur_idx,:,:].to(self.device)
-                
-                if self.TCDecoder is not None:
-                    # TCDecoder with LQ conditioning - the official FlashVSR approach
-                    # This is critical: TCDecoder.decode_video takes cond parameter
-                    # Input: cur_latents is (B, C, T, H, W), transpose to (B, T, C, H, W) for TCDecoder
-                    # Output: TCDecoder returns (B, T, 3, H, W), transpose back to (B, 3, T, H, W)
-                    cur_frames = self.TCDecoder.decode_video(
-                        cur_latents.transpose(1, 2),
-                        parallel=False,
-                        show_progress_bar=False,
-                        cond=cur_LQ_frame  # LQ conditioning is key!
-                    ).transpose(1, 2).mul_(2).sub_(1)  # Convert output from [0,1] to [-1,1]
-                else:
-                    # Fallback to VAE if TCDecoder not available (may have issues)
-                    cur_frames = self.vae.stream_decode([cur_latents])
-                    cur_frames = cur_frames.clamp_(-1, 1)
-                
-                # 颜色校正（per-chunk, like tiny-long）
-                try:
-                    if color_fix:
-                        cur_frames = self.ColorCorrector(
-                            cur_frames.to(device=self.device),
-                            cur_LQ_frame,
-                            clip_range=(-1, 1),
-                            chunk_size=None,
-                            method='adain'
-                        )
-                except:
-                    pass
-                
-                frames_total.append(cur_frames.to('cpu'))
-                LQ_pre_idx = LQ_cur_idx
-                
-                if unload_dit:
-                    del noise_pred_posi, cur_frames, cur_latents, cur_LQ_frame
-                    clean_vram()
+            # 更新 latent
+            cur_latents = cur_latents - noise_pred_posi
+            
+            # =======================================================================
+            # DECODE: Use TCDecoder with LQ conditioning (like tiny-long)
+            # =======================================================================
+            cur_LQ_frame = LQ_video[:,:,LQ_pre_idx:LQ_cur_idx,:,:].to(self.device)
+            
+            if self.TCDecoder is not None:
+                # TCDecoder with LQ conditioning - the official FlashVSR approach
+                # This is critical: TCDecoder.decode_video takes cond parameter
+                # Input: cur_latents is (B, C, T, H, W), transpose to (B, T, C, H, W) for TCDecoder
+                # Output: TCDecoder returns (B, T, 3, H, W), transpose back to (B, 3, T, H, W)
+                cur_frames = self.TCDecoder.decode_video(
+                    cur_latents.transpose(1, 2),
+                    parallel=False,
+                    show_progress_bar=False,
+                    cond=cur_LQ_frame  # LQ conditioning is key!
+                ).transpose(1, 2).mul_(2).sub_(1)  # Convert output from [0,1] to [-1,1]
+            else:
+                # Fallback to VAE if TCDecoder not available (may have issues)
+                cur_frames = self.vae.stream_decode([cur_latents])
+                cur_frames = cur_frames.clamp_(-1, 1)
+            
+            # 颜色校正（per-chunk, like tiny-long）
+            try:
+                if color_fix:
+                    cur_frames = self.ColorCorrector(
+                        cur_frames.to(device=self.device),
+                        cur_LQ_frame,
+                        clip_range=(-1, 1),
+                        chunk_size=None,
+                        method='adain'
+                    )
+            except:
+                pass
+            
+            frames_total.append(cur_frames.to('cpu'))
+            LQ_pre_idx = LQ_cur_idx
+            
+            if unload_dit:
+                del noise_pred_posi, cur_frames, cur_latents, cur_LQ_frame
+                clean_vram()
 
         if hasattr(self.dit, "LQ_proj_in"):
             self.dit.LQ_proj_in.clear_cache()

@@ -417,129 +417,129 @@ class FlashVSRTinyPipeline(BasePipeline):
                 LQ_cur_idx = cur_process_idx*8+21+(inner_loop_num-2)*4
                 cur_latents = latents[:, :, 4+cur_process_idx*2:6+cur_process_idx*2, :, :]
 
-                # 推理（无 motion_controller / vace）
-                noise_pred_posi, pre_cache_k, pre_cache_v = model_fn_wan_video(
-                    self.dit,
-                    x=cur_latents,
-                    timestep=self.timestep,
-                    context=None,
-                    tea_cache=None,
-                    use_unified_sequence_parallel=False,
-                    LQ_latents=LQ_latents,
-                    is_full_block=is_full_block,
-                    is_stream=is_stream,
-                    pre_cache_k=pre_cache_k,
-                    pre_cache_v=pre_cache_v,
-                    topk_ratio=topk_ratio,
-                    kv_ratio=kv_ratio,
-                    cur_process_idx=cur_process_idx,
-                    t_mod=self.t_mod,
-                    t=self.t,
-                    local_range = local_range,
-                )
+            # 推理（无 motion_controller / vace）
+            noise_pred_posi, pre_cache_k, pre_cache_v = model_fn_wan_video(
+                self.dit,
+                x=cur_latents,
+                timestep=self.timestep,
+                context=None,
+                tea_cache=None,
+                use_unified_sequence_parallel=False,
+                LQ_latents=LQ_latents,
+                is_full_block=is_full_block,
+                is_stream=is_stream,
+                pre_cache_k=pre_cache_k,
+                pre_cache_v=pre_cache_v,
+                topk_ratio=topk_ratio,
+                kv_ratio=kv_ratio,
+                cur_process_idx=cur_process_idx,
+                t_mod=self.t_mod,
+                t=self.t,
+                local_range = local_range,
+            )
 
-                # 更新 latent
-                cur_latents = cur_latents - noise_pred_posi
+            # 更新 latent
+            cur_latents = cur_latents - noise_pred_posi
 
-                # Streaming Decode!
-                cur_LQ_frame = LQ_video[:,:,LQ_pre_idx:LQ_cur_idx,:,:].to(self.device)
+            # Streaming Decode!
+            cur_LQ_frame = LQ_video[:,:,LQ_pre_idx:LQ_cur_idx,:,:].to(self.device)
 
-                if tiled: # tiled_vae logic
-                    B, C, T, H, W = cur_latents.shape
+            if tiled: # tiled_vae logic
+                B, C, T, H, W = cur_latents.shape
 
-                    l_tile_h, l_tile_w = tile_size
-                    l_stride_h, l_stride_w = tile_stride
+                l_tile_h, l_tile_w = tile_size
+                l_stride_h, l_stride_w = tile_stride
 
-                    if isinstance(l_tile_h, tuple): l_tile_h = l_tile_h[0]
-                    if isinstance(l_tile_w, tuple): l_tile_w = l_tile_w[0]
+                if isinstance(l_tile_h, tuple): l_tile_h = l_tile_h[0]
+                if isinstance(l_tile_w, tuple): l_tile_w = l_tile_w[0]
 
-                    l_tile_h = max(l_tile_h // 8, 4)
-                    l_tile_w = max(l_tile_w // 8, 4)
-                    l_stride_h = max(l_stride_h // 8, 1)
-                    l_stride_w = max(l_stride_w // 8, 1)
+                l_tile_h = max(l_tile_h // 8, 4)
+                l_tile_w = max(l_tile_w // 8, 4)
+                l_stride_h = max(l_stride_h // 8, 1)
+                l_stride_w = max(l_stride_w // 8, 1)
 
-                    out_H = H * 8
-                    out_W = W * 8
+                out_H = H * 8
+                out_W = W * 8
 
-                    # Calculate expected output temporal dimension
-                    # TCDecoder has 2 TGrow(stride=2) layers, so T is multiplied by 4
-                    # Trimming removes first `frames_to_trim` frames only when memory is uninitialized
-                    # Check if this is the first tile to determine trim behavior
-                    # Note: Index -8 checks a specific MemBlock in the decoder to determine if state exists
-                    sample_tile_key = (0, 0)
-                    if sample_tile_key not in vae_tile_states or vae_tile_states[sample_tile_key][-8] is None:
-                        # First decode - trimming will occur (frames_to_trim = 2**sum(decoder_time_upscale) - 1 = 3)
-                        T_out = T * 4 - self.TCDecoder.frames_to_trim
-                    else:
-                        # Subsequent decode - no trimming
-                        T_out = T * 4
-
-                    cur_frames = torch.zeros((B, 3, T_out, out_H, out_W), dtype=cur_latents.dtype, device='cpu')
-                    weights = torch.zeros((B, 3, T_out, out_H, out_W), dtype=cur_latents.dtype, device='cpu')
-
-                    for y in range(0, H, l_stride_h):
-                        for x in range(0, W, l_stride_w):
-                            y_end = min(y + l_tile_h, H)
-                            x_end = min(x + l_tile_w, W)
-
-                            if y_end <= y or x_end <= x: continue
-
-                            lat_tile = cur_latents[:, :, :, y:y_end, x:x_end]
-                            cond_y, cond_x = y * 8, x * 8
-                            cond_y_end, cond_x_end = y_end * 8, x_end * 8
-                            cond_tile = cur_LQ_frame[:, :, :, cond_y:cond_y_end, cond_x:cond_x_end]
-
-                            tile_key = (y, x)
-                            if tile_key not in vae_tile_states:
-                                vae_tile_states[tile_key] = [None] * len(self.TCDecoder.decoder)
-                            mem_tile = vae_tile_states[tile_key]
-
-                            out_tile, new_mem_tile = self.TCDecoder.decode_video(
-                                lat_tile.transpose(1, 2),
-                                parallel=False,
-                                show_progress_bar=False,
-                                cond=cond_tile,
-                                mem=mem_tile
-                            )
-                            vae_tile_states[tile_key] = new_mem_tile
-
-                            out_tile = out_tile.transpose(1, 2).to('cpu')
-                            th, tw = out_tile.shape[3], out_tile.shape[4]
-                            mask = torch.ones((1, 1, 1, th, tw), device='cpu')
-                            y_out, x_out = y * 8, x * 8
-                            cur_frames[:, :, :, y_out:y_out+th, x_out:x_out+tw] += out_tile * mask
-                            weights[:, :, :, y_out:y_out+th, x_out:x_out+tw] += mask
-
-                    weights[weights == 0] = 1.0
-                    cur_frames = cur_frames / weights
-                    cur_frames = cur_frames.mul_(2).sub_(1)
+                # Calculate expected output temporal dimension
+                # TCDecoder has 2 TGrow(stride=2) layers, so T is multiplied by 4
+                # Trimming removes first `frames_to_trim` frames only when memory is uninitialized
+                # Check if this is the first tile to determine trim behavior
+                # Note: Index -8 checks a specific MemBlock in the decoder to determine if state exists
+                sample_tile_key = (0, 0)
+                if sample_tile_key not in vae_tile_states or vae_tile_states[sample_tile_key][-8] is None:
+                    # First decode - trimming will occur (frames_to_trim = 2**sum(decoder_time_upscale) - 1 = 3)
+                    T_out = T * 4 - self.TCDecoder.frames_to_trim
                 else:
-                    cur_frames = self.TCDecoder.decode_video(
-                        cur_latents.transpose(1, 2),
-                        parallel=False,
-                        show_progress_bar=False,
-                        cond=cur_LQ_frame
-                    ).transpose(1, 2).mul_(2).sub_(1)
+                    # Subsequent decode - no trimming
+                    T_out = T * 4
 
-                # 颜色校正（wavelet）
-                try:
-                    if color_fix:
-                        cur_frames = self.ColorCorrector(
-                            cur_frames.to(device=self.device),
-                            cur_LQ_frame,
-                            clip_range=(-1, 1),
-                            chunk_size=16,
-                            method='adain'
-                        ).to('cpu') # Ensure back to CPU
-                except:
-                    pass
+                cur_frames = torch.zeros((B, 3, T_out, out_H, out_W), dtype=cur_latents.dtype, device='cpu')
+                weights = torch.zeros((B, 3, T_out, out_H, out_W), dtype=cur_latents.dtype, device='cpu')
 
-                frames_total.append(cur_frames)
-                LQ_pre_idx = LQ_cur_idx
+                for y in range(0, H, l_stride_h):
+                    for x in range(0, W, l_stride_w):
+                        y_end = min(y + l_tile_h, H)
+                        x_end = min(x + l_tile_w, W)
 
-                if unload_dit:
-                    del noise_pred_posi, cur_frames, cur_latents, cur_LQ_frame
-                    clean_vram()
+                        if y_end <= y or x_end <= x: continue
+
+                        lat_tile = cur_latents[:, :, :, y:y_end, x:x_end]
+                        cond_y, cond_x = y * 8, x * 8
+                        cond_y_end, cond_x_end = y_end * 8, x_end * 8
+                        cond_tile = cur_LQ_frame[:, :, :, cond_y:cond_y_end, cond_x:cond_x_end]
+
+                        tile_key = (y, x)
+                        if tile_key not in vae_tile_states:
+                            vae_tile_states[tile_key] = [None] * len(self.TCDecoder.decoder)
+                        mem_tile = vae_tile_states[tile_key]
+
+                        out_tile, new_mem_tile = self.TCDecoder.decode_video(
+                            lat_tile.transpose(1, 2),
+                            parallel=False,
+                            show_progress_bar=False,
+                            cond=cond_tile,
+                            mem=mem_tile
+                        )
+                        vae_tile_states[tile_key] = new_mem_tile
+
+                        out_tile = out_tile.transpose(1, 2).to('cpu')
+                        th, tw = out_tile.shape[3], out_tile.shape[4]
+                        mask = torch.ones((1, 1, 1, th, tw), device='cpu')
+                        y_out, x_out = y * 8, x * 8
+                        cur_frames[:, :, :, y_out:y_out+th, x_out:x_out+tw] += out_tile * mask
+                        weights[:, :, :, y_out:y_out+th, x_out:x_out+tw] += mask
+
+                weights[weights == 0] = 1.0
+                cur_frames = cur_frames / weights
+                cur_frames = cur_frames.mul_(2).sub_(1)
+            else:
+                cur_frames = self.TCDecoder.decode_video(
+                    cur_latents.transpose(1, 2),
+                    parallel=False,
+                    show_progress_bar=False,
+                    cond=cur_LQ_frame
+                ).transpose(1, 2).mul_(2).sub_(1)
+
+            # 颜色校正（wavelet）
+            try:
+                if color_fix:
+                    cur_frames = self.ColorCorrector(
+                        cur_frames.to(device=self.device),
+                        cur_LQ_frame,
+                        clip_range=(-1, 1),
+                        chunk_size=16,
+                        method='adain'
+                    ).to('cpu') # Ensure back to CPU
+            except:
+                pass
+
+            frames_total.append(cur_frames)
+            LQ_pre_idx = LQ_cur_idx
+
+            if unload_dit:
+                del noise_pred_posi, cur_frames, cur_latents, cur_LQ_frame
+                clean_vram()
 
         if hasattr(self.dit, "LQ_proj_in"):
             self.dit.LQ_proj_in.clear_cache()

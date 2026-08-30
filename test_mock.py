@@ -291,7 +291,7 @@ class TestFlashVSRNodes(unittest.TestCase):
         pipe.TCDecoder.decode_video = MagicMock(side_effect=mock_decode_video)
 
         # Mock model_fn_wan_video in all pipeline modules
-        mock_model_fn = MagicMock(return_value=(torch.zeros((1, 16, 2, 8, 8)), [None], [None]))
+        mock_model_fn = MagicMock(side_effect=lambda dit, x, *args, **kwargs: (torch.zeros_like(x), [None], [None]))
         src.pipelines.flashvsr_full.model_fn_wan_video = mock_model_fn
         src.pipelines.flashvsr_tiny.model_fn_wan_video = mock_model_fn
         src.pipelines.flashvsr_tiny_long.model_fn_wan_video = mock_model_fn
@@ -319,6 +319,15 @@ class TestFlashVSRNodes(unittest.TestCase):
         self.assertIsNotNone(out_193)
         self.assertTrue(out_193.shape[1] > 0, "Should have produced output frames for 193 frames")
 
+        # Test with tiled=True for 193 frames
+        pipe = self._setup_mock_pipe(FlashVSRTinyPipeline)
+        out_193_tiled = pipe(
+            prompt="", cfg_scale=1.0, num_frames=193, height=64, width=64,
+            LQ_video=LQ_193, tiled=True, color_fix=False, progress_bar_cmd=list
+        )
+        self.assertIsNotNone(out_193_tiled)
+        self.assertTrue(out_193_tiled.shape[1] > 0, "Should have produced output frames for tiled 193 frames")
+
     def test_tiny_long_pipeline_streaming_success(self):
         """Test FlashVSRTinyLongPipeline successfully produces output frames for num_frames=193."""
         pipe = self._setup_mock_pipe(FlashVSRTinyLongPipeline)
@@ -329,6 +338,15 @@ class TestFlashVSRNodes(unittest.TestCase):
         )
         self.assertIsNotNone(out)
         self.assertTrue(out.shape[1] > 0, "Should have produced output frames")
+
+        # Test with tiled=True
+        pipe = self._setup_mock_pipe(FlashVSRTinyLongPipeline)
+        out_tiled = pipe(
+            prompt="", cfg_scale=1.0, num_frames=193, height=64, width=64,
+            LQ_video=LQ, tiled=True, color_fix=False, progress_bar_cmd=list
+        )
+        self.assertIsNotNone(out_tiled)
+        self.assertTrue(out_tiled.shape[1] > 0, "Should have produced output frames for tiled 193 frames")
 
     def test_full_pipeline_streaming_success(self):
         """Test FlashVSRFullPipeline successfully produces output frames for num_frames=193."""
