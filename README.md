@@ -1,19 +1,13 @@
 # ComfyUI-FlashVSR_Stable
 
+### This is an actively maintained fork of REAL Video Enhancer with bug fixes, stability improvements, and performance optimizations applied on top of the archived upstream.
+
 **High-performance Video Super Resolution for ComfyUI with VRAM optimization.**
 
 Run FlashVSR on 8GB-24GB+ GPUs without artifacts. Features intelligent resource management, 5 VAE options, and auto-downloading models.
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-Compatible-green.svg)](https://github.com/comfyanonymous/ComfyUI)
-
----
-
-## ComfyUI Node Registry
-
-**Published Version:** [Link to Registry](https://registry.comfy.org/publishers/naxci1/nodes/ComfyUI-FlashVSR_Stable)
-
-**Development Registry:** [Link to Development Registry](https://registry.comfy.org/publishers/naxci1/dev_nodes/ComfyUI-FlashVSR)
 
 ---
 
