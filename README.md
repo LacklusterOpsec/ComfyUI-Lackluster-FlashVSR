@@ -342,8 +342,8 @@ All arguments map 1:1 with ComfyUI node inputs. Run `python cli_main.py --help` 
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/naxci1/ComfyUI-FlashVSR_Stable.git
-python -m pip install -r ComfyUI-FlashVSR_Stable/requirements.txt
+git clone https://github.com/LacklusterOpsec/ComfyUI-Lackluster-FlashVSR.git
+python -m pip install -r ComfyUI-Lackluster-FlashVSR/requirements.txt
 ```
 
 > 📢 **Turing architecture or older GPUs (GTX 16 series, RTX 20 series, and earlier)**: Install `triton<3.3.0`:
@@ -372,7 +372,7 @@ ComfyUI/models/FlashVSR/
 
 By default, FlashVSR looks for models in `ComfyUI/models/FlashVSR/`. To use a different location (e.g., models on another drive):
 
-1. Edit `model_paths.yaml` in the `ComfyUI-FlashVSR_Stable` directory
+1. Edit `model_paths.yaml` in the `ComfyUI-Lackluster-FlashVSR` directory
 2. Set `flashvsr_model_path` to your custom path
 3. Restart ComfyUI
 
