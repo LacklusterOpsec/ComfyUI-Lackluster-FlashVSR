@@ -712,7 +712,16 @@ def prepare_input_tensor(image_tensor: torch.Tensor, device, scale: int = 4, dty
     sW, sH, tW, tH, pad_left, pad_top = compute_scaled_and_target_dims(w0, h0, scale=scale, multiple=multiple)
     num_frames_with_padding = N0 + 4
     F = largest_8n1_leq(num_frames_with_padding)
-    
+
+    # The streaming pipeline requires process_total_num >= 2 so that at least one
+    # denoise+decode iteration runs (iteration 0 is priming-only and appends nothing).
+    # process_total_num = (num_frames - 1) // 8 - 2 >= 2  =>  num_frames >= 33.
+    # Pad short/single-image inputs up to this minimum; frames are replicated below
+    # via min(i, N0-1), and output is collapsed/sliced back to N0 by the caller.
+    MIN_STREAMING_FRAMES = 33
+    if F < MIN_STREAMING_FRAMES:
+        F = MIN_STREAMING_FRAMES
+
     if F == 0:
         raise RuntimeError(f"Not enough frames after padding. Got {num_frames_with_padding}.")
     

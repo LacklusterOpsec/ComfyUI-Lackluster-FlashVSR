@@ -574,8 +574,15 @@ class FlashVSRTinyLongPipeline(BasePipeline):
             if force_offload:
                 self.offload_model()
             
+            if not frames_total:
+                raise RuntimeError(
+                    f"FlashVSR streaming pipeline produced no output frames. "
+                    f"num_frames={num_frames} is too small: the streaming loop needs "
+                    f"num_frames >= 33 (process_total_num={process_total_num}, need >= 2). "
+                    f"Feed more frames or use a larger frame_chunk_size."
+                )
             frames = torch.cat(frames_total, dim=2)
-            
+
         return frames[0]
 
 
