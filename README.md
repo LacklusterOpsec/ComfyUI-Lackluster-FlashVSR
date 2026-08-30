@@ -1,6 +1,6 @@
-# ComfyUI-FlashVSR_Stable
-
-### This is an actively maintained fork of REAL Video Enhancer with bug fixes, stability improvements, and performance optimizations applied on top of the archived upstream.
+## ComfyUI-Lackluster-FlashVSR
+# Has issues, use upstream 
+~~This is an actively maintained fork of REAL Video Enhancer with bug fixes, stability improvements, and performance optimizations applied on top of the archived upstream.~~
 
 **High-performance Video Super Resolution for ComfyUI with VRAM optimization.**
 
